@@ -1,6 +1,7 @@
 export default {
   "11dcfbd9": [() => import(/* webpackChunkName: "11dcfbd9" */ "@site/../docs/swagger.md"), "@site/../docs/swagger.md", require.resolveWeak("@site/../docs/swagger.md")],
   "17896441": [() => import(/* webpackChunkName: "17896441" */ "@theme/DocItem"), "@theme/DocItem", require.resolveWeak("@theme/DocItem")],
+  "1c4bb38b": [() => import(/* webpackChunkName: "1c4bb38b" */ "@site/../docs/RELEASE_NOTES.md"), "@site/../docs/RELEASE_NOTES.md", require.resolveWeak("@site/../docs/RELEASE_NOTES.md")],
   "22dd74f7": [() => import(/* webpackChunkName: "22dd74f7" */ "@generated/docusaurus-plugin-content-docs/default/p/index-466.json"), "@generated/docusaurus-plugin-content-docs/default/p/index-466.json", require.resolveWeak("@generated/docusaurus-plugin-content-docs/default/p/index-466.json")],
   "296b32b4": [() => import(/* webpackChunkName: "296b32b4" */ "@site/../docs/api/OCR_RESPONSE.md"), "@site/../docs/api/OCR_RESPONSE.md", require.resolveWeak("@site/../docs/api/OCR_RESPONSE.md")],
   "3907c39f": [() => import(/* webpackChunkName: "3907c39f" */ "@site/../docs/guides/onboarding.md"), "@site/../docs/guides/onboarding.md", require.resolveWeak("@site/../docs/guides/onboarding.md")],

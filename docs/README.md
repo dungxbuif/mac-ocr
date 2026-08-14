@@ -19,6 +19,7 @@ Integrate image and PDF text recognition through REST or MCP. OCR Platform accep
 2. Use the [API reference](api/API_REFERENCE.md) for authentication, upload, polling, webhook, SSE, limits, and error contracts.
 3. Read the [OCR response model](api/OCR_RESPONSE.md) before consuming text blocks, confidence values, or bounding boxes.
 4. Follow [MCP integration](api/MCP_INTEGRATION.md) when connecting an agent or MCP client.
+5. Check [Release Notes](RELEASE_NOTES.md) for current features and changelog.
 
 ## Core contract
 

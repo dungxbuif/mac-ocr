@@ -26,6 +26,8 @@ Run one scheduler-capable proxy replica first. Multi-replica queue claiming is s
 
 ## Build artifacts
 
+### Local / Bare-metal build
+
 ```bash
 cd proxy/admin-ui
 npm ci
@@ -47,6 +49,20 @@ swift build -c release
 ```
 
 Build web assets before the Go binary because both are embedded at compile time.
+
+### Docker Container build
+
+Alternatively, build the containerized proxy image using the multi-stage [Dockerfile](file:///Users/dungxbuif/workspace/mac-ocr/Dockerfile) from the repository root:
+
+```bash
+docker build \
+  --build-arg PUBLIC_API_BASE_URL="https://ocr.example.com" \
+  --build-arg PUBLIC_DOCS_BASE_URL="https://docs.example.com" \
+  --build-arg APP_ENV="production" \
+  --build-arg VERSION="1.0.0" \
+  -t macocr-proxy:latest .
+```
+
 
 ## Infrastructure prerequisites
 

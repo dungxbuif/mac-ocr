@@ -197,11 +197,14 @@ curl -fsS "$API_URL/api/v1/openapi.json" | jq -e '
 echo "PASS openapi"
 curl -fsS "$API_URL/api/v1/docs" >/dev/null
 echo "PASS swagger-docs"
-curl -fsS "$API_URL/api/OCR_RESPONSE" | grep -q "OCR response model"
+curl -fsS -o "$TMP_DIR/ocr-response-docs.html" "$API_URL/api/OCR_RESPONSE"
+grep -q "OCR response model" "$TMP_DIR/ocr-response-docs.html"
 echo "PASS docusaurus OCR response docs"
-curl -fsS "$API_URL/api/MCP_INTEGRATION" | grep -q "MCP integration"
+curl -fsS -o "$TMP_DIR/mcp-docs.html" "$API_URL/api/MCP_INTEGRATION"
+grep -q "MCP integration" "$TMP_DIR/mcp-docs.html"
 echo "PASS docusaurus MCP docs"
-curl -fsS "$API_URL/admin/" | grep -q 'id="root"'
+curl -fsS -o "$TMP_DIR/admin.html" "$API_URL/admin/"
+grep -q 'id="root"' "$TMP_DIR/admin.html"
 echo "PASS admin static app"
 
 ADMIN_EMAIL="admin-$RUN_ID@example.test"

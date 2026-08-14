@@ -36,6 +36,10 @@
               "sidebar": "docsSidebar"
             },
             {
+              "id": "RELEASE_NOTES",
+              "path": "/RELEASE_NOTES"
+            },
+            {
               "id": "swagger",
               "path": "/api/v1/docs",
               "unlisted": true
