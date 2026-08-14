@@ -1,0 +1,119 @@
+# Software Requirements — Current Implementation
+
+## Purpose
+
+OCR Platform exposes authenticated HTTP APIs for asynchronous text extraction from images and PDF documents. This document describes the behavior implemented in this repository and does not identify the underlying recognition engine.
+
+## Actors
+
+- API client: submits documents and polls status or results.
+- Agent client: uses MCP tools, resources, tasks, and task/resource notifications.
+- Administrator: manages accounts, limits, and API keys.
+- Proxy: authenticates, validates, stores, queues, and exposes document state.
+- OCR worker: accepts queued work and sends a signed completion or failure event.
+- Scheduler: claims queued documents in creation order and dispatches one document at a time per polling cycle.
+
+## Public OCR requirements
+
+1. All OCR submissions are asynchronous and return `202 Accepted`.
+2. The server generates every public `documentId`; no batch identifier is created or stored.
+3. Clients do not provide or store `clientDocumentId` values.
+4. Submission idempotency keys are not implemented.
+5. A single submission accepts `application/json` containing a public HTTPS URL or strict Base64 input.
+6. A batch request is a direct JSON array containing 1–100 URL or Base64 items.
+7. Batch items use the same validation and document preparation path as single submissions.
+8. A batch validation error identifies the zero-based item index and rejects the request.
+9. Every accepted batch item is stored as a normal queued document and processed by the same scheduler.
+10. Clients poll one document resource that includes the result after completion.
+11. Batch submission returns independent document IDs and does not expose a public batch resource.
+12. Each document may select webhook or SSE notification; polling remains authoritative.
+13. Completed results expire at `resultExpiresAt` and return `410 RESULT_EXPIRED` afterward.
+
+## Input schema
+
+Single JSON:
+
+```json
+{
+  "input": {"url": "https://files.example.com/document.png"},
+  "options": {"recognitionLevel": "accurate"}
+}
+```
+
+Batch JSON:
+
+```json
+[
+  {"input": {"url": "https://files.example.com/a.png"}},
+  {"input": {"base64": "iVBORw0KGgo..."}}
+]
+```
+
+Each JSON `input` must contain exactly one of `url` or `base64`. A client-supplied media type is neither required nor trusted.
+
+## Input validation requirements
+
+- Reject unknown JSON fields.
+- Reject multipart, form, raw-file, and client-supplied media-type submission contracts.
+- Limit URL response bodies to a 100 MiB deployment safety ceiling.
+- Limit decoded Base64 to 25 MiB before allocating the decoded payload.
+- Limit single JSON envelopes to 36 MiB and batch/MCP envelopes to 128 MiB.
+- Require strict standard Base64 alphabet and padding.
+- Identify content through an allowlist of magic bytes.
+- Validate PNG and JPEG structure and reject images above 40 million pixels.
+- Reject truncated files.
+- Reject encrypted PDF and PDF active-content markers.
+- Require HTTPS URL sources without embedded credentials.
+- Reject private, loopback, link-local, multicast, unspecified, and metadata IP addresses.
+- Apply address checks at URL validation, redirects, and connection time.
+- Generate opaque object-key suffixes; caller filenames are not part of the public contract.
+
+## Document lifecycle
+
+```text
+queued → processing → completed
+                    ↘ failed
+queued → cancelled
+```
+
+Only queued documents can be cancelled. The PostgreSQL row is the source of truth for public status.
+
+## Authentication and limits
+
+- Protected OCR endpoints require a Bearer API key.
+- Newly generated keys use `sk_ocr_<random>` and are stored as SHA-256 hashes.
+- Revoked keys and disabled accounts cannot authenticate.
+- Administrators can deactivate an account without deleting keys, documents, or audit history. Deactivation invalidates cached key metadata and takes effect for API keys and administrator sessions immediately; already queued documents continue.
+- Redis enforces per-key and aggregate per-account request limits and caches account limit/quota configuration for five minutes.
+- PostgreSQL atomically reserves document quota after input validation.
+- Quota mutations invalidate the account cache; PostgreSQL remains authoritative for atomic reservation.
+- Cancelling queued work refunds one quota unit.
+- Dispatch infrastructure failures refund the affected unit.
+
+## Storage and dispatch
+
+- PostgreSQL stores users, keys, authoritative limits, documents, state, notification outbox rows, and temporary result fields. It has no batch table or document batch foreign key.
+- S3-compatible object storage stores normalized inputs and result JSON.
+- Redis stores active API-key lookup entries, rate-limit counters, cached account configuration, and full OCR result payloads with `RESULT_TTL`.
+- API-key cache entries contain metadata keyed by the SHA-256 key hash, never the plaintext credential. Revocation invalidates all cached keys for that account; disabled-user state is still read from PostgreSQL for every request.
+- Public and MCP result reads obtain the payload directly from Redis after verifying document ownership/state in PostgreSQL.
+- A periodic retention worker clears expired payload fields from PostgreSQL and best-effort deletes result objects. Document lifecycle tombstones remain.
+- The scheduler claims queued rows using `FOR UPDATE SKIP LOCKED`.
+- Input is dispatched to the worker through a short-lived presigned URL.
+- Worker callbacks use HMAC-SHA256 and a five-minute timestamp window.
+
+## Notifications and agents
+
+- Webhook targets require public HTTPS and receive HMAC-signed, retryable events.
+- Webhook secrets are encrypted at rest and never returned.
+- `GET /v1/events` provides an authenticated account-isolated SSE stream with cursor resume.
+- `/mcp` implements MCP `2025-11-25` tools, document resources, task operations, and task/resource notifications.
+- MCP submissions use the same validation, quota, document repository, scheduler, and result retention as REST submissions.
+
+## Documentation requirements
+
+- Human guides are served from `/`.
+- Swagger UI is served from `/api/v1/docs`.
+- OpenAPI 3.1 is generated from Go schemas and served from `/api/v1/openapi.json`.
+- MCP tool schemas are runtime definitions reused by the OpenAPI `x-mcp-tools` extension.
+- Public documentation must describe OCR behavior without naming the internal recognition engine.

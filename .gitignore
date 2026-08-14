@@ -1,0 +1,36 @@
+# Env / secrets
+.env
+*.env.local
+!.env.example
+
+# Swift / SPM
+.build/
+*.build/
+.swiftpm/
+
+# Go & Binaries
+proxy/bin/
+proxy/proxy
+proxy/*.exe
+native/native
+local-dev/native/native
+*.test
+*.out
+*.prof
+
+# Local development services
+node_modules/
+local-dev/s3/data/
+local-dev/s3/package-lock.json
+
+# Editor / OS
+.DS_Store
+*.DS_Store
+._*
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log
+

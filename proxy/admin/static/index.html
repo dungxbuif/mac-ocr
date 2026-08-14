@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <title>OCR Platform — Admin Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="admin-header">
+    <div class="header-brand">
+      <span>◆</span> OCR Platform Admin Console
+    </div>
+    <div id="user-controls" style="display: flex; align-items: center; gap: 1rem;">
+      <span id="user-email" style="font-size: 0.9rem; color: var(--pico-muted-color);"></span>
+      <button id="btn-logout" class="outline contrast" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; margin: 0;">Logout</button>
+    </div>
+  </header>
+
+  <!-- Login Modal View -->
+  <dialog id="login-modal">
+    <article style="max-width: 420px; width: 100%;">
+      <header>
+        <h3 style="margin: 0; color: var(--pico-primary);">Admin Login</h3>
+      </header>
+      <form id="form-login">
+        <label for="login-email">Email Address
+          <input type="email" id="login-email" required placeholder="admin@example.com">
+        </label>
+        <label for="login-pass">Password
+          <input type="password" id="login-pass" required placeholder="••••••••">
+        </label>
+        <p id="login-error" style="color: #ef4444; font-size: 0.85rem; display: none;"></p>
+        <button type="submit" style="width: 100%; margin-top: 1rem;">Sign In</button>
+      </form>
+    </article>
+  </dialog>
+
+  <!-- Main App Layout -->
+  <div class="main-container" id="app-layout">
+    <aside class="sidebar">
+      <nav>
+        <ul>
+          <li><a href="#/dashboard" class="nav-link active" data-target="view-dashboard">📊 Dashboard</a></li>
+          <li><a href="#/users" class="nav-link" data-target="view-users">👥 Users & Limits</a></li>
+          <li><a href="#/documents" class="nav-link" data-target="view-documents">📑 OCR Queue</a></li>
+          <li><a href="/" target="_blank">📚 API Docs ↗</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <!-- View: Dashboard -->
+      <section id="view-dashboard" class="view-section">
+        <h2>System Overview</h2>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-title">Queued Jobs</div>
+            <div class="stat-value" id="stat-queued">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Processing Jobs</div>
+            <div class="stat-value" id="stat-processing" style="color: #eab308;">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Completed Today</div>
+            <div class="stat-value" id="stat-completed" style="color: #22c55e;">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Total Users</div>
+            <div class="stat-value" id="stat-users">0</div>
+          </div>
+        </div>
+
+        <div class="card" style="background: var(--pico-card-background-color); padding: 1.5rem; border-radius: 12px;">
+          <h3>Quick Actions</h3>
+          <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <button onclick="location.hash = '#/users'" style="margin: 0;">Create User Account</button>
+            <button onclick="refreshDashboard()" class="secondary" style="margin: 0;">Refresh Metrics</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- View: Users -->
+      <section id="view-users" class="view-section" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+          <h2 style="margin: 0;">User Accounts & Quotas</h2>
+          <button id="btn-open-create-user" style="margin: 0; padding: 0.5rem 1rem;">+ New User</button>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table role="grid">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Rate (RPM)</th>
+                <th>Doc Quota</th>
+                <th>Doc Used</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-table-body">
+              <tr><td colspan="8" style="text-align: center;">Loading users...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- View: Documents -->
+      <section id="view-documents" class="view-section" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+          <h2 style="margin: 0;">OCR Document Queue</h2>
+          <button onclick="loadDocuments()" class="secondary" style="margin: 0; padding: 0.5rem 1rem;">Refresh Queue</button>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table role="grid">
+            <thead>
+              <tr>
+                <th>Document ID</th>
+                <th>User ID</th>
+                <th>Status</th>
+                <th>Content Type</th>
+                <th>Size</th>
+                <th>Created At</th>
+                <th>Result Preview</th>
+              </tr>
+            </thead>
+            <tbody id="documents-table-body">
+              <tr><td colspan="7" style="text-align: center;">Loading queue...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Create User Modal -->
+  <dialog id="modal-create-user">
+    <article style="max-width: 500px; width: 100%;">
+      <header>
+        <button aria-label="Close" rel="prev" onclick="document.getElementById('modal-create-user').removeAttribute('open')"></button>
+        <h3 style="margin: 0;">Create User Account</h3>
+      </header>
+      <form id="form-create-user">
+        <label for="cu-email">Email Address
+          <input type="email" id="cu-email" required placeholder="user@example.com">
+        </label>
+        <label for="cu-rate">Rate Limit (Requests / Min)
+          <input type="number" id="cu-rate" value="60" min="0">
+        </label>
+        <label for="cu-quota">Doc Quota (0 = Unlimited)
+          <input type="number" id="cu-quota" value="1000" min="0">
+        </label>
+        <button type="submit" style="width: 100%; margin-top: 1rem;">Create Account</button>
+      </form>
+    </article>
+  </dialog>
+
+  <!-- Key Created Modal -->
+  <dialog id="modal-key-display">
+    <article style="max-width: 520px; width: 100%;">
+      <header>
+        <h3 style="margin: 0; color: #22c55e;">✓ API Key Created</h3>
+      </header>
+      <p>Save this API key now. It will <strong>never</strong> be displayed again in plaintext:</p>
+      <div class="key-box" id="key-display-text"></div>
+      <button onclick="document.getElementById('modal-key-display').removeAttribute('open')" style="width: 100%;">I Have Saved This Key</button>
+    </article>
+  </dialog>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

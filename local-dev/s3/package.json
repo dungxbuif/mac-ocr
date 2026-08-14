@@ -1,0 +1,11 @@
+{
+  "name": "macocr-s3rver",
+  "private": true,
+  "description": "Lightweight local S3-compatible server for OCR API development.",
+  "scripts": {
+    "start": "node serve.js"
+  },
+  "dependencies": {
+    "s3rver": "^3.7.1"
+  }
+}

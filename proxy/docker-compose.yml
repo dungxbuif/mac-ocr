@@ -1,0 +1,7 @@
+# NOTE: Local infrastructure is managed OUTSIDE this repo:
+#   - PostgreSQL + Redis: ~/dev-env/docker-compose.yml (containers postgres, redis)
+#   - S3: local-dev/s3 (s3rver, run via `make s3`)
+#
+# This file intentionally has no services. Kept so `docker compose` commands
+# are no-ops rather than errors.
+services: {}

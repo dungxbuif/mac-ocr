@@ -1,0 +1,306 @@
+package rest
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+
+	"macocr/proxy/domain"
+	"macocr/proxy/internal/errs"
+	"macocr/proxy/internal/usecase/auth"
+)
+
+const ctxKey = "auth.apiKey"
+
+type AuthService interface {
+	CreateUser(ctx context.Context, email string, role domain.Role, password string, rateLimit *int, docQuota *int64) (*domain.User, error)
+	GetUser(ctx context.Context, id int64) (*domain.User, error)
+	ListUsers(ctx context.Context, limit, offset int) ([]domain.User, error)
+	UpdateUser(ctx context.Context, id int64, email *string, role *domain.Role, disabled *bool) (*domain.User, error)
+
+	GetAccountConfig(ctx context.Context, userID int64) (*domain.AccountConfig, error)
+	UpdateAccountConfig(ctx context.Context, userID int64, rateLimitRPM *int, docQuota *int64, adminID *int64) (*domain.AccountConfig, error)
+	ResetDocQuota(ctx context.Context, userID int64) error
+
+	GenerateKey(ctx context.Context, userID int64, name string, rateLimitRPM int) (*auth.GeneratedKey, error)
+	ListKeys(ctx context.Context, userID int64) ([]domain.ApiKey, error)
+	RevokeKey(ctx context.Context, userID, keyID int64) error
+	Authenticate(ctx context.Context, raw string) (*domain.ApiKey, error)
+}
+
+type AuthHandler struct {
+	svc AuthService
+}
+
+func NewAuthHandler(svc AuthService) *AuthHandler {
+	return &AuthHandler{svc: svc}
+}
+
+type createUserReq struct {
+	Email        string      `json:"email" binding:"required,email"`
+	Role         domain.Role `json:"role,omitempty" binding:"omitempty,oneof=admin user"`
+	RateLimitRPM *int        `json:"rate_limit_rpm,omitempty" binding:"omitempty,gte=0"`
+	DocQuota     *int64      `json:"doc_quota,omitempty" binding:"omitempty,gte=0"`
+}
+
+func (h *AuthHandler) CreateUser(c *gin.Context) {
+	var req createUserReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondProblem(c, errs.InvalidInput(err.Error()))
+		return
+	}
+
+	u, err := h.svc.CreateUser(c.Request.Context(), req.Email, req.Role, "", req.RateLimitRPM, req.DocQuota)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, u)
+}
+
+func (h *AuthHandler) ListUsers(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil || limit < 1 || limit > 100 {
+		RespondProblem(c, errs.InvalidInput("limit must be an integer from 1 through 100"))
+		return
+	}
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil || offset < 0 {
+		RespondProblem(c, errs.InvalidInput("offset must be a non-negative integer"))
+		return
+	}
+
+	users, err := h.svc.ListUsers(c.Request.Context(), limit, offset)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"users":  users,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+func (h *AuthHandler) GetUser(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	u, err := h.svc.GetUser(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, u)
+}
+
+type updateUserReq struct {
+	Email    *string      `json:"email,omitempty" binding:"omitempty,email"`
+	Role     *domain.Role `json:"role,omitempty" binding:"omitempty,oneof=admin user"`
+	Disabled *bool        `json:"disabled,omitempty"`
+}
+
+func (h *AuthHandler) UpdateUser(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var req updateUserReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondProblem(c, errs.InvalidInput(err.Error()))
+		return
+	}
+	if req.Email == nil && req.Role == nil && req.Disabled == nil {
+		RespondProblem(c, errs.InvalidInput("at least one of email, role, or disabled is required"))
+		return
+	}
+	u, err := h.svc.UpdateUser(c.Request.Context(), userID, req.Email, req.Role, req.Disabled)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, u)
+}
+
+// DeactivateUser disables an account without deleting its documents, audit
+// metadata, or API-key records. Existing queued work continues normally; all
+// subsequent API-key authentication attempts are rejected.
+func (h *AuthHandler) DeactivateUser(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	disabled := true
+	u, err := h.svc.UpdateUser(c.Request.Context(), userID, nil, nil, &disabled)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, u)
+}
+
+func (h *AuthHandler) GetAccountConfig(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	cfg, err := h.svc.GetAccountConfig(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, cfg)
+}
+
+type updateConfigReq struct {
+	RateLimitRPM *int   `json:"rate_limit_rpm,omitempty" binding:"omitempty,gte=0"`
+	DocQuota     *int64 `json:"doc_quota,omitempty" binding:"omitempty,gte=0"`
+}
+
+func (h *AuthHandler) UpdateAccountConfig(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var req updateConfigReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondProblem(c, errs.InvalidInput(err.Error()))
+		return
+	}
+	if req.RateLimitRPM == nil && req.DocQuota == nil {
+		RespondProblem(c, errs.InvalidInput("at least one of rate_limit_rpm or doc_quota is required"))
+		return
+	}
+	cfg, err := h.svc.UpdateAccountConfig(c.Request.Context(), userID, req.RateLimitRPM, req.DocQuota, nil)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, cfg)
+}
+
+func (h *AuthHandler) ResetDocQuota(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.svc.ResetDocQuota(c.Request.Context(), userID); err != nil {
+		RespondError(c, err)
+		return
+	}
+	cfg, err := h.svc.GetAccountConfig(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "quota reset successful",
+		"config":  cfg,
+	})
+}
+
+type createKeyReq struct {
+	Name         string `json:"name" binding:"omitempty,max=100"`
+	RateLimitRPM int    `json:"rate_limit_rpm" binding:"gte=0"`
+}
+
+func (h *AuthHandler) CreateAPIKey(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var req createKeyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondProblem(c, errs.InvalidInput(err.Error()))
+		return
+	}
+	k, err := h.svc.GenerateKey(c.Request.Context(), userID, req.Name, req.RateLimitRPM)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, k)
+}
+
+func (h *AuthHandler) ListAPIKeys(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	keys, err := h.svc.ListKeys(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user_id": userID, "api_keys": keys})
+}
+
+func (h *AuthHandler) RevokeAPIKey(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	keyID, ok := parseID(c, "kid")
+	if !ok {
+		return
+	}
+	if err := h.svc.RevokeKey(c.Request.Context(), userID, keyID); err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *AuthHandler) RequireAPIKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw, err := bearerToken(c)
+		if err != nil {
+			RespondProblem(c, errs.Unauthorized("missing or malformed Authorization header"))
+			c.Abort()
+			return
+		}
+		k, err := h.svc.Authenticate(c.Request.Context(), raw)
+		if err != nil {
+			RespondError(c, err)
+			c.Abort()
+			return
+		}
+		c.Set(ctxKey, k)
+		c.Next()
+	}
+}
+
+func apiKeyFrom(c *gin.Context) (*domain.ApiKey, bool) {
+	v, ok := c.Get(ctxKey)
+	if !ok {
+		return nil, false
+	}
+	k, ok := v.(*domain.ApiKey)
+	return k, ok
+}
+
+func bearerToken(c *gin.Context) (string, error) {
+	hdr := c.GetHeader("Authorization")
+	if hdr == "" {
+		return "", errors.New("missing Authorization header")
+	}
+	parts := strings.SplitN(hdr, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return "", errors.New("malformed Authorization header")
+	}
+	return strings.TrimSpace(parts[1]), nil
+}
+
+func parseID(c *gin.Context, param string) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param(param), 10, 64)
+	if err != nil || id <= 0 {
+		RespondProblem(c, errs.InvalidInput("invalid "+param+" parameter"))
+		return 0, false
+	}
+	return id, true
+}

@@ -1,0 +1,123 @@
+package rest
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"macocr/proxy/admin"
+	"macocr/proxy/docs"
+	"macocr/proxy/domain"
+	"macocr/proxy/internal/rest/middleware"
+)
+
+type Router struct {
+	engine *gin.Engine
+}
+
+func NewRouter(
+	logger *slog.Logger,
+	health *HealthHandler,
+	auth *AuthHandler,
+	doc *DocumentHandler,
+	batch *BatchHandler,
+	cap *CapabilitiesHandler,
+	adminAuth *AdminAuthHandler,
+	webhook *WebhookHandler,
+	notifications *NotificationHandler,
+	mcp *MCPHandler,
+) *Router {
+	gin.SetMode(gin.ReleaseMode)
+	gin.EnableJsonDecoderDisallowUnknownFields()
+	engine := gin.New()
+
+	engine.Use(
+		middleware.RequestID(),
+		middleware.Logger(logger),
+		middleware.Recovery(logger),
+	)
+
+	health.Register(engine.Group("/"))
+	engine.GET("/api/v1/docs", gin.WrapH(docs.SwaggerHandler(doc.apiBaseURL)))
+	engine.GET("/api/v1/docs/", gin.WrapH(docs.SwaggerHandler(doc.apiBaseURL)))
+	engine.GET("/api/v1/openapi.json", gin.WrapH(OpenAPIHandler()))
+
+	engine.Any("/admin", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/admin/")
+	})
+	engine.Any("/admin/*filepath", gin.WrapH(http.StripPrefix("/admin", admin.Handler())))
+
+	engine.POST("/webhooks/native/events", webhook.HandleNativeEvent)
+	engine.POST("/mcp", auth.RequireAPIKey(), mcp.Post)
+	engine.GET("/mcp", auth.RequireAPIKey(), mcp.Get)
+
+	api := engine.Group("/v1")
+
+	api.GET("/ocr/capabilities", cap.Get)
+	api.GET("/events", auth.RequireAPIKey(), notifications.Events)
+
+	api.POST("/auth/login", adminAuth.Login)
+	api.POST("/auth/logout", adminAuth.Logout)
+	api.GET("/auth/me", adminAuth.Me)
+
+	adminGrp := api.Group("/admin", adminAuth.RequireAdminSession())
+	adminGrp.GET("/dashboard", adminAuth.DashboardStats)
+	adminGrp.GET("/documents", func(c *gin.Context) {
+		docList, err := doc.svc.ListDocumentsAdmin(c.Request.Context(), "", 100, 0)
+		if err != nil {
+			RespondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"documents": docList})
+	})
+
+	accountAdmin := api.Group("/", adminAuth.RequireAdminSession())
+	accountAdmin.POST("/users", auth.CreateUser)
+	accountAdmin.GET("/users", auth.ListUsers)
+	accountAdmin.GET("/users/:id", auth.GetUser)
+	accountAdmin.PATCH("/users/:id", auth.UpdateUser)
+	accountAdmin.POST("/users/:id/deactivate", auth.DeactivateUser)
+	accountAdmin.GET("/users/:id/config", auth.GetAccountConfig)
+	accountAdmin.PATCH("/users/:id/config", auth.UpdateAccountConfig)
+	accountAdmin.POST("/users/:id/config/reset-quota", auth.ResetDocQuota)
+	accountAdmin.POST("/users/:id/apikeys", auth.CreateAPIKey)
+	accountAdmin.GET("/users/:id/apikeys", auth.ListAPIKeys)
+	accountAdmin.DELETE("/users/:id/apikeys/:kid", auth.RevokeAPIKey)
+
+	registerDocRoutes(api.Group("/documents", auth.RequireAPIKey()), doc)
+
+	registerBatchRoutes(api.Group("/batches", auth.RequireAPIKey()), batch)
+
+	engine.NoRoute(gin.WrapH(docs.Handler(doc.apiBaseURL, doc.docsBaseURL)))
+
+	return &Router{engine: engine}
+}
+
+func registerDocRoutes(g *gin.RouterGroup, h *DocumentHandler) {
+	g.POST("", h.Submit)
+	g.GET("", h.List)
+	g.GET("/:id", h.Get)
+	g.DELETE("/:id", h.Cancel)
+}
+
+func registerBatchRoutes(g *gin.RouterGroup, h *BatchHandler) {
+	g.POST("", h.Submit)
+}
+
+func (r *Router) Handler() http.Handler { return r.engine }
+
+func (r *Router) ListenAndServe(ctx context.Context, addr string, shutdownTimeout time.Duration) error {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r.engine,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	return serveGracefully(ctx, srv, shutdownTimeout)
+}
+
+func (h *DocumentHandler) DocumentLinksForStatus(docID string, status domain.DocumentStatus) map[string]gin.H {
+	return h.documentLinks(docID, status)
+}

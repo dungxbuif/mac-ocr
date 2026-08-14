@@ -1,0 +1,10 @@
+{
+  "name": "ocr-platform-local-dev",
+  "private": true,
+  "description": "One-command local OCR development services",
+  "scripts": {
+    "start": "node start.js",
+    "s3": "npm --prefix s3 start",
+    "native": "go run ./native"
+  }
+}
