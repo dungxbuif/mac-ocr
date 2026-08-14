@@ -45,6 +45,9 @@ func (h *NotificationHandler) Events(c *gin.Context) {
 	defer heartbeat.Stop()
 
 	for {
+		if revalidateAPIKey(c) != nil {
+			return
+		}
 		events, err := h.svc.ListSSE(c.Request.Context(), key.UserID, cursor)
 		if err != nil {
 			return

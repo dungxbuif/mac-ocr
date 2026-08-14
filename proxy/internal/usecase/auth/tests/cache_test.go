@@ -14,6 +14,7 @@ type runtimeCache struct {
 	keys             map[string]domain.ApiKey
 	deletes          int
 	keyInvalidations int
+	keyDeleteErr     error
 }
 
 func (c *runtimeCache) GetAPIKey(_ context.Context, hash string) (*domain.ApiKey, error) {
@@ -28,6 +29,9 @@ func (c *runtimeCache) SetAPIKey(_ context.Context, hash string, key *domain.Api
 	return nil
 }
 func (c *runtimeCache) DeleteAPIKeysByUser(_ context.Context, userID int64) error {
+	if c.keyDeleteErr != nil {
+		return c.keyDeleteErr
+	}
 	for hash, key := range c.keys {
 		if key.UserID == userID {
 			delete(c.keys, hash)
@@ -35,6 +39,33 @@ func (c *runtimeCache) DeleteAPIKeysByUser(_ context.Context, userID int64) erro
 	}
 	c.keyInvalidations++
 	return nil
+}
+
+func TestAPIKeyRevocationIsAuthoritativeWhenCacheInvalidationFails(t *testing.T) {
+	ctx := context.Background()
+	users, configs, keys := newMockUsers(), newMockConfigs(), newMockKeys()
+	users.byID[9] = &domain.User{ID: 9, Email: "revoke@example.com"}
+	configs.byUserID[9] = &domain.AccountConfig{UserID: 9, RateLimitRPM: 70}
+	cache := &runtimeCache{
+		configs:      make(map[int64]domain.AccountConfig),
+		keys:         make(map[string]domain.ApiKey),
+		keyDeleteErr: errors.New("redis unavailable"),
+	}
+	svc := auth.NewService(users, configs, keys, cache)
+
+	generated, err := svc.GenerateKey(ctx, 9, "cached", 50)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	if err := svc.RevokeKey(ctx, 9, generated.KeyID); err != nil {
+		t.Fatalf("database revocation must succeed despite cache outage: %v", err)
+	}
+	if len(cache.keys) != 1 {
+		t.Fatalf("test requires a stale positive cache entry")
+	}
+	if _, err := svc.Authenticate(ctx, generated.Key); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("stale cached key authenticated after authoritative revoke: %v", err)
+	}
 }
 
 func (c *runtimeCache) Allow(context.Context, string, int) (bool, error) { return true, nil }

@@ -111,6 +111,9 @@ func (h *MCPHandler) Get(c *gin.Context) {
 	defer poll.Stop()
 	defer heartbeat.Stop()
 	for {
+		if revalidateAPIKey(c) != nil {
+			return
+		}
 		events, err := h.notifications.ListSSE(c.Request.Context(), key.UserID, cursor)
 		if err != nil {
 			return

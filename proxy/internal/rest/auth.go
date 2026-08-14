@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	ctxKey        = "auth.apiKey"
-	auditUserID   = "audit.user_id"
-	auditAPIKeyID = "audit.api_key_id"
-	auditActor    = "audit.actor"
+	ctxKey               = "auth.apiKey"
+	ctxAPIKeyRevalidator = "auth.apiKeyRevalidator"
+	auditUserID          = "audit.user_id"
+	auditAPIKeyID        = "audit.api_key_id"
+	auditActor           = "audit.actor"
 )
 
 type AuthService interface {
@@ -35,6 +36,7 @@ type AuthService interface {
 	ListKeys(ctx context.Context, userID int64) ([]domain.ApiKey, error)
 	RevokeKey(ctx context.Context, userID, keyID int64) error
 	Authenticate(ctx context.Context, raw string) (*domain.ApiKey, error)
+	ValidateActive(ctx context.Context, raw string) (*domain.ApiKey, error)
 }
 
 type AuthHandler struct {
@@ -276,11 +278,27 @@ func (h *AuthHandler) RequireAPIKey() gin.HandlerFunc {
 			return
 		}
 		c.Set(ctxKey, k)
+		c.Set(ctxAPIKeyRevalidator, func(ctx context.Context) error {
+			_, err := h.svc.ValidateActive(ctx, raw)
+			return err
+		})
 		c.Set(auditActor, "api_key")
 		c.Set(auditUserID, k.UserID)
 		c.Set(auditAPIKeyID, k.ID)
 		c.Next()
 	}
+}
+
+func revalidateAPIKey(c *gin.Context) error {
+	v, ok := c.Get(ctxAPIKeyRevalidator)
+	if !ok {
+		return domain.ErrUnauthorized
+	}
+	revalidate, ok := v.(func(context.Context) error)
+	if !ok {
+		return domain.ErrUnauthorized
+	}
+	return revalidate(c.Request.Context())
 }
 
 func apiKeyFrom(c *gin.Context) (*domain.ApiKey, bool) {

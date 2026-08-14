@@ -176,6 +176,10 @@ func (f *fakeAuthService) Authenticate(_ context.Context, raw string) (*domain.A
 	return nil, domain.ErrUnauthorized
 }
 
+func (f *fakeAuthService) ValidateActive(ctx context.Context, raw string) (*domain.ApiKey, error) {
+	return f.Authenticate(ctx, raw)
+}
+
 func newAuthTestRouter(svc rest.AuthService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()

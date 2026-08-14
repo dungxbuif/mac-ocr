@@ -296,46 +296,25 @@ func (s *Service) RevokeKey(ctx context.Context, userID, keyID int64) error {
 	}
 	for _, k := range keys {
 		if k.ID == keyID {
-			revokeErr := s.keys.Revoke(ctx, keyID)
-			if s.keyCache != nil {
-				if cacheErr := s.keyCache.DeleteAPIKeysByUser(ctx, userID); cacheErr != nil {
-					return cacheErr
-				}
+			if err := s.keys.Revoke(ctx, keyID); err != nil {
+				return err
 			}
-			return revokeErr
+			if s.keyCache != nil {
+				// PostgreSQL is authoritative. A cache outage must not make a
+				// successful revocation appear to have failed or remain usable.
+				_ = s.keyCache.DeleteAPIKeysByUser(ctx, userID)
+			}
+			return nil
 		}
 	}
 	return domain.ErrNotFound
 }
 
 func (s *Service) Authenticate(ctx context.Context, raw string) (*domain.ApiKey, error) {
-	if len(raw) != len("sk_ocr_")+48 || !strings.HasPrefix(raw, "sk_ocr_") {
-		return nil, domain.ErrUnauthorized
+	k, err := s.ValidateActive(ctx, raw)
+	if err != nil {
+		return nil, err
 	}
-	if _, err := hex.DecodeString(strings.TrimPrefix(raw, "sk_ocr_")); err != nil {
-		return nil, domain.ErrUnauthorized
-	}
-	hash := hashKey(raw)
-	var k *domain.ApiKey
-	if s.keyCache != nil {
-		k, _ = s.keyCache.GetAPIKey(ctx, hash)
-	}
-	if k == nil {
-		var err error
-		k, err = s.keys.GetByHash(ctx, hash)
-		if err != nil {
-			return nil, domain.ErrUnauthorized
-		}
-	}
-	if k.RevokedAt != nil {
-		return nil, domain.ErrUnauthorized
-	}
-
-	u, err := s.users.GetByID(ctx, k.UserID)
-	if err != nil || u.Disabled {
-		return nil, domain.ErrUnauthorized
-	}
-	_ = s.cacheAPIKey(ctx, hash, k)
 
 	if k.RateLimitRPM > 0 && s.rl != nil {
 		allowed, err := s.rl.Allow(ctx, fmt.Sprintf("key:%d", k.ID), k.RateLimitRPM)
@@ -348,7 +327,12 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (*domain.ApiKey,
 	}
 
 	userCfg, err := s.getConfig(ctx, k.UserID)
-	if err == nil && userCfg != nil && userCfg.RateLimitRPM > 0 && s.rl != nil {
+	if err != nil {
+		// Limits are authorization policy. If they cannot be loaded, fail
+		// closed instead of accidentally granting an unlimited request.
+		return nil, err
+	}
+	if userCfg != nil && userCfg.RateLimitRPM > 0 && s.rl != nil {
 		allowed, err := s.rl.Allow(ctx, fmt.Sprintf("user:%d", k.UserID), userCfg.RateLimitRPM)
 		if err != nil {
 			return nil, err
@@ -358,6 +342,35 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (*domain.ApiKey,
 		}
 	}
 
+	return k, nil
+}
+
+// ValidateActive performs the authoritative credential and account-state
+// checks without consuming a rate-limit unit. Long-lived streams use it to
+// make revocation and account deactivation effective after connection setup.
+func (s *Service) ValidateActive(ctx context.Context, raw string) (*domain.ApiKey, error) {
+	if len(raw) != len("sk_ocr_")+48 || !strings.HasPrefix(raw, "sk_ocr_") {
+		return nil, domain.ErrUnauthorized
+	}
+	if _, err := hex.DecodeString(strings.TrimPrefix(raw, "sk_ocr_")); err != nil {
+		return nil, domain.ErrUnauthorized
+	}
+	hash := hashKey(raw)
+	// Always read the authoritative key row. A positive credential cache can
+	// otherwise outlive a revoke when Redis invalidation is unavailable.
+	k, err := s.keys.GetByHash(ctx, hash)
+	if err != nil {
+		return nil, domain.ErrUnauthorized
+	}
+	if k.RevokedAt != nil {
+		return nil, domain.ErrUnauthorized
+	}
+
+	u, err := s.users.GetByID(ctx, k.UserID)
+	if err != nil || u.Disabled {
+		return nil, domain.ErrUnauthorized
+	}
+	_ = s.cacheAPIKey(ctx, hash, k)
 	return k, nil
 }
 
