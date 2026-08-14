@@ -30,6 +30,10 @@ Before the final run, 10-page PDFs at concurrency 2 exposed duplicate native pro
 - Minimum free memory was 36%; maximum native RSS was about 7.6 GiB while LM Studio's loaded worker occupied about 24 GiB.
 - macOS reported no thermal or performance warning after the run.
 
+## Legacy-row compatibility defect found during final restart
+
+The final clean restart exposed a scheduler log loop when an older document row had nullable input metadata. `GetByID` scanned `input_content_type = NULL` into a Go string, so exhausted-attempt cleanup retried and logged the same database error every second. The repository query now applies the same `COALESCE` defaults already used by admin listing for nullable key, checksum, content type, and size fields. After restart, readiness stayed healthy, the error loop disappeared, and the exhausted legacy row was finalized (`0` exhausted processing rows remained).
+
 ## Capacity conclusion
 
 - Receipt images: concurrency 4 is the efficient setting; concurrency 6 passed but added comparatively little throughput.

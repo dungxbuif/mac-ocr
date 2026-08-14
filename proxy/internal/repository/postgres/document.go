@@ -171,7 +171,7 @@ func getDocumentByID(ctx context.Context, db rowQuerier, id string, cipher *noti
 
 	err := db.QueryRow(ctx,
 		`SELECT id, user_id, status,
-		        COALESCE(input_key, ''), input_sha256, input_content_type, input_size_bytes, options_json,
+		        COALESCE(input_key, ''), COALESCE(input_sha256, ''), COALESCE(input_content_type, ''), COALESCE(input_size_bytes, 0), options_json,
 		        result_key, result_text, error_detail, attempt_id, attempt_count, processing_until, terminal_event_id,
 		        notification_type, notification_url, notification_secret, result_expires_at,
 		        created_at, updated_at
