@@ -36,6 +36,8 @@ type presignUploadReq struct {
 	ContentType string `json:"contentType,omitempty"`
 }
 
+const maxPresignJSONRequestBytes = 8 << 10
+
 func (h *UploadHandler) Presign(c *gin.Context) {
 	k, ok := apiKeyFrom(c)
 	if !ok {
@@ -47,8 +49,12 @@ func (h *UploadHandler) Presign(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPresignJSONRequestBytes)
 	var req presignUploadReq
 	if err := decodeStrictRequestJSON(c, &req); err != nil {
+		if respondRequestTooLarge(c, err, maxPresignJSONRequestBytes) {
+			return
+		}
 		RespondProblem(c, errs.InvalidInput(err.Error()))
 		return
 	}

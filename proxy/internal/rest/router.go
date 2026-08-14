@@ -127,10 +127,17 @@ func registerBatchRoutes(g *gin.RouterGroup, h *BatchHandler) {
 func (r *Router) Handler() http.Handler { return r.engine }
 
 func (r *Router) ListenAndServe(ctx context.Context, addr string, shutdownTimeout time.Duration) error {
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           r.engine,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := newHTTPServer(addr, r.engine)
 	return serveGracefully(ctx, srv, shutdownTimeout)
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+	}
 }

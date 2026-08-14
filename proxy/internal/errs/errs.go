@@ -146,13 +146,10 @@ func Internal(detail string) *Problem {
 	return New(CodeInternal, http.StatusInternalServerError, "Internal error").WithDetail(detail)
 }
 
-func ServiceUnavailable(detail string, cause error) *Problem {
+func ServiceUnavailable(detail string, _ error) *Problem {
 	p := New(CodeServiceUnavailable, http.StatusServiceUnavailable, "Service unavailable")
 	if detail != "" {
 		p = p.WithDetail(detail)
-	}
-	if cause != nil {
-		p = p.WithDetail(cause.Error())
 	}
 	return p
 }

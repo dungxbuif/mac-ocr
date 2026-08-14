@@ -52,3 +52,23 @@ func TestBase64TooLargeProblemIncludesBatchIndexAndAction(t *testing.T) {
 		}
 	}
 }
+
+func TestStorageUnavailableDoesNotLeakInternalCause(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/", func(c *gin.Context) {
+		rest.RespondError(c, fmt.Errorf("%w: postgres://admin:secret@db.internal/private", domain.ErrStorageUnavailable))
+	})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "db.internal") {
+		t.Fatalf("public error leaked backend details: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"detail":"storage backend unavailable"`) {
+		t.Fatalf("expected safe service detail: %s", w.Body.String())
+	}
+}

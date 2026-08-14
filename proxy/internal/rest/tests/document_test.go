@@ -238,6 +238,16 @@ func TestPresignedUploadFlowAndLimits(t *testing.T) {
 
 	router := setupUploadTestRouter(docSvc, authSvc, objRepo, 1024)
 
+	w := httptest.NewRecorder()
+	oversizedBody := `{"filename":"` + strings.Repeat("x", 9<<10) + `","sizeBytes":1}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/uploads/presign", strings.NewReader(oversizedBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+genKey.Key)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge || !strings.Contains(w.Body.String(), `"code":"PAYLOAD_TOO_LARGE"`) {
+		t.Fatalf("expected oversized presign envelope rejection, got %d: %s", w.Code, w.Body.String())
+	}
+
 	for _, size := range []int64{1025, 1 << 30} {
 		w := httptest.NewRecorder()
 		body := fmt.Sprintf(`{"filename":"sample.png","sizeBytes":%d}`, size)
@@ -253,8 +263,8 @@ func TestPresignedUploadFlowAndLimits(t *testing.T) {
 		t.Fatalf("rejected presign consumed document quota: %d", cfgRepo.configs[1].DocUsed)
 	}
 
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/uploads/presign", strings.NewReader(`{"filename":"boundary.bin","sizeBytes":1024}`))
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/uploads/presign", strings.NewReader(`{"filename":"boundary.bin","sizeBytes":1024}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+genKey.Key)
 	router.ServeHTTP(w, req)
