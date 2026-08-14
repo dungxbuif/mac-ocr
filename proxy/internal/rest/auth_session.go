@@ -2,8 +2,12 @@ package rest
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,10 +20,59 @@ import (
 )
 
 const (
-	SessionCookieName = "macocr_session"
-	CSRFCookieName    = "macocr_csrf"
-	SessionDuration   = 8 * time.Hour
+	SessionCookieName  = "macocr_session"
+	CSRFCookieName     = "macocr_csrf"
+	SessionDuration    = 8 * time.Hour
+	maxLoginBodyBytes  = 8 << 10
+	loginAttemptLimit  = 5
+	loginAttemptWindow = time.Minute
 )
+
+type loginAttempt struct {
+	count       int
+	windowStart time.Time
+}
+
+type loginAttemptLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]loginAttempt
+}
+
+func newLoginAttemptLimiter() *loginAttemptLimiter {
+	return &loginAttemptLimiter{attempts: make(map[string]loginAttempt)}
+}
+
+func (l *loginAttemptLimiter) allow(keys ...string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	if len(l.attempts) >= 10_000 {
+		for key, entry := range l.attempts {
+			if now.Sub(entry.windowStart) >= loginAttemptWindow {
+				delete(l.attempts, key)
+			}
+		}
+	}
+	allowed := true
+	for _, key := range keys {
+		entry, exists := l.attempts[key]
+		if !exists && len(l.attempts) >= 10_000 {
+			allowed = false
+			continue
+		}
+		if entry.windowStart.IsZero() || now.Sub(entry.windowStart) >= loginAttemptWindow {
+			entry = loginAttempt{windowStart: now}
+		}
+		entry.count++
+		l.attempts[key] = entry
+		if entry.count > loginAttemptLimit {
+			allowed = false
+		}
+	}
+
+	return allowed
+}
 
 type AdminSession struct {
 	UserID    int64
@@ -87,6 +140,7 @@ type AdminAuthHandler struct {
 	docs    *document.Service
 	sm      *SessionManager
 	isHTTPS bool
+	logins  *loginAttemptLimiter
 }
 
 func NewAdminAuthHandler(users domain.UserRepository, docs *document.Service, sm *SessionManager, isHTTPS bool) *AdminAuthHandler {
@@ -95,6 +149,7 @@ func NewAdminAuthHandler(users domain.UserRepository, docs *document.Service, sm
 		docs:    docs,
 		sm:      sm,
 		isHTTPS: isHTTPS,
+		logins:  newLoginAttemptLimiter(),
 	}
 }
 
@@ -104,9 +159,22 @@ type loginReq struct {
 }
 
 func (h *AdminAuthHandler) Login(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxLoginBodyBytes)
 	var req loginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			RespondProblem(c, errs.New(errs.CodePayloadTooLarge, http.StatusRequestEntityTooLarge, "Login request is too large").WithLimit("maxRequestBytes", maxLoginBodyBytes))
+			return
+		}
 		RespondProblem(c, errs.InvalidInput(err.Error()))
+		return
+	}
+
+	emailDigest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(req.Email))))
+	if !h.logins.allow("ip:"+remoteIP(c.Request), "email:"+hex.EncodeToString(emailDigest[:])) {
+		c.Header("Retry-After", "60")
+		RespondProblem(c, errs.New(errs.CodeRateLimited, http.StatusTooManyRequests, "Too many login attempts").WithDetail("try again later"))
 		return
 	}
 
@@ -137,6 +205,14 @@ func (h *AdminAuthHandler) Login(c *gin.Context) {
 			"role":  u.Role,
 		},
 	})
+}
+
+func remoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func (h *AdminAuthHandler) Logout(c *gin.Context) {

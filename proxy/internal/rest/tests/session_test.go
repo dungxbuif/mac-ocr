@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -121,4 +122,56 @@ func TestAdminSessionAuth_LoginMeLogout(t *testing.T) {
 	}
 
 	_ = cfgRepo
+}
+
+func TestAdminLoginRejectsOversizedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := rest.NewAdminAuthHandler(newMockUserRepo(), nil, rest.NewSessionManager(), false)
+	r.POST("/v1/auth/login", h.Login)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(`{"email":"admin@test.local","password":"`+strings.Repeat("x", 9<<10)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"PAYLOAD_TOO_LARGE"`) {
+		t.Fatalf("expected machine-readable payload limit response: %s", w.Body.String())
+	}
+}
+
+func TestAdminLoginRateLimitsBeforePasswordVerification(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	users := newMockUserRepo()
+	hash, err := auth.HashPassword("AdminPass123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	users.users[10] = &domain.User{ID: 10, Email: "admin@test.local", Role: domain.RoleAdmin, PasswordHash: hash}
+	h := rest.NewAdminAuthHandler(users, nil, rest.NewSessionManager(), false)
+	r.POST("/v1/auth/login", h.Login)
+
+	body := `{"email":"admin@test.local","password":"wrong password"}`
+	for attempt := 1; attempt <= 6; attempt++ {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "203.0.113.10:4321"
+		r.ServeHTTP(w, req)
+
+		want := http.StatusUnauthorized
+		if attempt == 6 {
+			want = http.StatusTooManyRequests
+		}
+		if w.Code != want {
+			t.Fatalf("attempt %d: expected %d, got %d: %s", attempt, want, w.Code, w.Body.String())
+		}
+		if attempt == 6 && w.Header().Get("Retry-After") != "60" {
+			t.Fatalf("expected Retry-After on rate limit")
+		}
+	}
 }
