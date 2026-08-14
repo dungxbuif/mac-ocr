@@ -1,0 +1,147 @@
+{
+  "createdAt": "2026-08-15T02:59:54.406885+07:00",
+  "documentId": "doc_1a001dc10276db79cd63d96",
+  "inputContentType": "image/png",
+  "inputSizeBytes": 14644,
+  "links": [
+    {
+      "rel": "self",
+      "href": "http://localhost:8080/v1/documents/doc_1a001dc10276db79cd63d96"
+    }
+  ],
+  "result": {
+    "text": "The (quick) [brown] {fox} jumps!\nOver the $43,456.78 <lazy> #90 dog\n& duck/goose, as 12.5% of E-mail\nfrom aspammer@website.com is spam.\nDer „schnelle\" braune Fuchs springt\nüber den faulen Hund. Le renard brun\n«rapide» saute par-dessus le chien\nparesseux. La volpe marrone rapida\nsalta sopra il cane pigro. El zorro\nmarrón rápido salta sobre el perro\nperezoso. A raposa marrom rápida\nsalta sobre o cão preguiçoso.",
+    "pageCount": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "text": "The (quick) [brown] {fox} jumps!\nOver the $43,456.78 <lazy> #90 dog\n& duck/goose, as 12.5% of E-mail\nfrom aspammer@website.com is spam.\nDer „schnelle\" braune Fuchs springt\nüber den faulen Hund. Le renard brun\n«rapide» saute par-dessus le chien\nparesseux. La volpe marrone rapida\nsalta sopra il cane pigro. El zorro\nmarrón rápido salta sobre el perro\nperezoso. A raposa marrom rápida\nsalta sobre o cão preguiçoso.",
+        "blocks": [
+          {
+            "text": "The (quick) [brown] {fox} jumps!",
+            "confidence": 1,
+            "bbox": [
+              0.10115813368541676,
+              0.85597346301863,
+              0.7096459269523621,
+              0.06235533714294439
+            ]
+          },
+          {
+            "text": "Over the $43,456.78 <lazy> #90 dog",
+            "confidence": 1,
+            "bbox": [
+              0.09927672558644907,
+              0.7897964311815969,
+              0.7702098488807678,
+              0.06998863220214846
+            ]
+          },
+          {
+            "text": "& duck/goose, as 12.5% of E-mail",
+            "confidence": 1,
+            "bbox": [
+              0.08886032789696391,
+              0.7166277012007174,
+              0.7323415875434875,
+              0.09200117111206063
+            ]
+          },
+          {
+            "text": "from aspammer@website.com is spam.",
+            "confidence": 1,
+            "bbox": [
+              0.09524892626473269,
+              0.6644169526683226,
+              0.8017123341560364,
+              0.06840598106384288
+            ]
+          },
+          {
+            "text": "Der „schnelle\" braune Fuchs springt",
+            "confidence": 1,
+            "bbox": [
+              0.0992392163659242,
+              0.6058434746714657,
+              0.7605695724487305,
+              0.07081216812133795
+            ]
+          },
+          {
+            "text": "über den faulen Hund. Le renard brun",
+            "confidence": 1,
+            "bbox": [
+              0.09710488476849721,
+              0.5438213293094314,
+              0.8019139170646667,
+              0.06932001113891606
+            ]
+          },
+          {
+            "text": "«rapide» saute par-dessus le chien",
+            "confidence": 1,
+            "bbox": [
+              0.09726002853076493,
+              0.4805377092184213,
+              0.7195136547088623,
+              0.06375267505645765
+            ]
+          },
+          {
+            "text": "paresseux. La volpe marrone rapida",
+            "confidence": 1,
+            "bbox": [
+              0.09540659955731978,
+              0.41858793461223753,
+              0.7467672824859619,
+              0.06315172433853156
+            ]
+          },
+          {
+            "text": "salta sopra il cane pigro. El zorro",
+            "confidence": 1,
+            "bbox": [
+              0.09570312675781245,
+              0.3599999995208333,
+              0.72265625,
+              0.05750000000000011
+            ]
+          },
+          {
+            "text": "marrón rápido salta sobre el perro",
+            "confidence": 1,
+            "bbox": [
+              0.09535563112824702,
+              0.2931820044462661,
+              0.7214499115943909,
+              0.06577790260314942
+            ]
+          },
+          {
+            "text": "perezoso. A raposa marrom rápida",
+            "confidence": 1,
+            "bbox": [
+              0.09583335453275027,
+              0.22872340487781284,
+              0.7166666388511658,
+              0.06382978439331055
+            ]
+          },
+          {
+            "text": "salta sobre o cão preguiçoso.",
+            "confidence": 1,
+            "bbox": [
+              0.09308467431801037,
+              0.1659955736481672,
+              0.6071240901947021,
+              0.07637676000595095
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "resultExpiresAt": "2026-08-22T02:59:55.319709+07:00",
+  "status": "completed",
+  "updatedAt": "2026-08-15T02:59:55.319119+07:00"
+}

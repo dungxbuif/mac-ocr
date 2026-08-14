@@ -1,0 +1,1207 @@
+{
+  "generatedAt": "2026-08-14T20:12:18Z",
+  "e2e": "PASS",
+  "accuracyPassed": true,
+  "loadPassed": true,
+  "recommendedNativeConcurrency": 1,
+  "workloadRecommendations": {
+    "receiptImages": 4,
+    "multiPageOrMixed": 1
+  },
+  "maxValidatedConcurrency": 6,
+  "resourceSummary": {
+    "minMemoryFreePercent": 36.0,
+    "maxProxyRssMB": 117.0,
+    "maxNativeRssMB": 7626.1,
+    "maxNativeCpuPercent": 107.4,
+    "maxLlmEffectiveRssMB": 24576.0
+  },
+  "accuracyCases": [
+    {
+      "name": "eurotext-checksum-fixture",
+      "kind": "simple",
+      "bytes": 14644,
+      "documentId": "doc_1a001dc10276db79cd63d96",
+      "expectedPages": 1,
+      "actualPages": 1,
+      "presignSeconds": 0.0109,
+      "uploadSeconds": 0.0153,
+      "submitSeconds": 0.0153,
+      "processingSeconds": 3.0173,
+      "metrics": {
+        "expectedTokens": 27,
+        "actualTokens": 73,
+        "matchedTokens": 27,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 0.3699,
+        "phraseCoverage": 1.0,
+        "matchedPhrases": 4,
+        "expectedPhrases": 4
+      },
+      "passed": true
+    },
+    {
+      "name": "cord-validation-000",
+      "kind": "receipt",
+      "bytes": 71942,
+      "documentId": "doc_1a001dc1c1794eb02b9107d",
+      "expectedPages": 1,
+      "actualPages": 1,
+      "presignSeconds": 0.0036,
+      "uploadSeconds": 0.0175,
+      "submitSeconds": 0.0141,
+      "processingSeconds": 3.0162,
+      "metrics": {
+        "expectedTokens": 24,
+        "actualTokens": 24,
+        "matchedTokens": 24,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 1.0,
+        "phraseCoverage": 0.75,
+        "matchedPhrases": 9,
+        "expectedPhrases": 12
+      },
+      "passed": true
+    },
+    {
+      "name": "cord-validation-001",
+      "kind": "receipt",
+      "bytes": 177136,
+      "documentId": "doc_1a001dc280f4e309874b470",
+      "expectedPages": 1,
+      "actualPages": 1,
+      "presignSeconds": 0.0068,
+      "uploadSeconds": 0.0245,
+      "submitSeconds": 0.0159,
+      "processingSeconds": 3.0207,
+      "metrics": {
+        "expectedTokens": 15,
+        "actualTokens": 16,
+        "matchedTokens": 15,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 0.9375,
+        "phraseCoverage": 0.5,
+        "matchedPhrases": 3,
+        "expectedPhrases": 6
+      },
+      "passed": true
+    },
+    {
+      "name": "cord-validation-002",
+      "kind": "receipt",
+      "bytes": 25430,
+      "documentId": "doc_1a001dc340377c009a48d00",
+      "expectedPages": 1,
+      "actualPages": 1,
+      "presignSeconds": 0.0056,
+      "uploadSeconds": 0.0179,
+      "submitSeconds": 0.0123,
+      "processingSeconds": 3.0204,
+      "metrics": {
+        "expectedTokens": 26,
+        "actualTokens": 26,
+        "matchedTokens": 24,
+        "tokenRecall": 0.9231,
+        "tokenPrecision": 0.9231,
+        "phraseCoverage": 0.4,
+        "matchedPhrases": 4,
+        "expectedPhrases": 10
+      },
+      "passed": true
+    },
+    {
+      "name": "cord-validation-007",
+      "kind": "receipt",
+      "bytes": 42265,
+      "documentId": "doc_1a001dc3ff76c9493187712",
+      "expectedPages": 1,
+      "actualPages": 1,
+      "presignSeconds": 0.0041,
+      "uploadSeconds": 0.019,
+      "submitSeconds": 0.0151,
+      "processingSeconds": 3.0182,
+      "metrics": {
+        "expectedTokens": 29,
+        "actualTokens": 31,
+        "matchedTokens": 27,
+        "tokenRecall": 0.931,
+        "tokenPrecision": 0.871,
+        "phraseCoverage": 0.3,
+        "matchedPhrases": 3,
+        "expectedPhrases": 10
+      },
+      "passed": true
+    },
+    {
+      "name": "cord-validation-015",
+      "kind": "receipt",
+      "bytes": 144414,
+      "documentId": "doc_1a001dc4be6886c894e481b",
+      "expectedPages": 1,
+      "actualPages": 1,
+      "presignSeconds": 0.0034,
+      "uploadSeconds": 0.0178,
+      "submitSeconds": 0.0132,
+      "processingSeconds": 3.0105,
+      "metrics": {
+        "expectedTokens": 36,
+        "actualTokens": 36,
+        "matchedTokens": 36,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 1.0,
+        "phraseCoverage": 0.6154,
+        "matchedPhrases": 8,
+        "expectedPhrases": 13
+      },
+      "passed": true
+    },
+    {
+      "name": "cord-10-page",
+      "kind": "multipage-pdf",
+      "bytes": 470005,
+      "documentId": "doc_1a001dc57e112dfffc413ca",
+      "expectedPages": 10,
+      "actualPages": 10,
+      "presignSeconds": 0.0032,
+      "uploadSeconds": 0.0275,
+      "submitSeconds": 0.0229,
+      "processingSeconds": 15.0532,
+      "metrics": {
+        "expectedTokens": 260,
+        "actualTokens": 282,
+        "matchedTokens": 254,
+        "tokenRecall": 0.9769,
+        "tokenPrecision": 0.9007,
+        "phraseCoverage": 0.549,
+        "matchedPhrases": 56,
+        "expectedPhrases": 102
+      },
+      "passed": true
+    },
+    {
+      "name": "cord-30-page",
+      "kind": "multipage-pdf",
+      "bytes": 478577,
+      "documentId": "doc_1a001dc92ffb5e6a35d0f2c",
+      "expectedPages": 30,
+      "actualPages": 30,
+      "presignSeconds": 0.0027,
+      "uploadSeconds": 0.0271,
+      "submitSeconds": 0.0494,
+      "processingSeconds": 36.1063,
+      "metrics": {
+        "expectedTokens": 780,
+        "actualTokens": 850,
+        "matchedTokens": 762,
+        "tokenRecall": 0.9769,
+        "tokenPrecision": 0.8965,
+        "phraseCoverage": 0.549,
+        "matchedPhrases": 168,
+        "expectedPhrases": 306
+      },
+      "passed": true
+    }
+  ],
+  "loadRounds": [
+    {
+      "workload": "receipt-image",
+      "workerLimit": 1,
+      "jobs": 6,
+      "completed": 6,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 3.0505,
+      "throughputDocsPerSecond": 1.9669,
+      "latencyP50Seconds": 3.0431,
+      "latencyP95Seconds": 3.0441,
+      "minMemoryFreePercent": 41.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001dd203173dbf426c4e4",
+          "status": "completed",
+          "submitSeconds": 0.0301,
+          "processingSeconds": 3.0135,
+          "totalSeconds": 3.0435,
+          "characters": 98
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001dd2034e5c222c1d266",
+          "status": "completed",
+          "submitSeconds": 0.0342,
+          "processingSeconds": 3.008,
+          "totalSeconds": 3.0422,
+          "characters": 98
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001dd203cd6dee078257f",
+          "status": "completed",
+          "submitSeconds": 0.0373,
+          "processingSeconds": 3.0065,
+          "totalSeconds": 3.0438,
+          "characters": 98
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001dd2033c9680591593a",
+          "status": "completed",
+          "submitSeconds": 0.0306,
+          "processingSeconds": 3.0094,
+          "totalSeconds": 3.04,
+          "characters": 98
+        },
+        {
+          "index": 4,
+          "documentId": "doc_1a001dd203c68637a7ca101",
+          "status": "completed",
+          "submitSeconds": 0.0382,
+          "processingSeconds": 3.0059,
+          "totalSeconds": 3.0441,
+          "characters": 98
+        },
+        {
+          "index": 5,
+          "documentId": "doc_1a001dd203c470c00e1ba27",
+          "status": "completed",
+          "submitSeconds": 0.0369,
+          "processingSeconds": 3.0062,
+          "totalSeconds": 3.0431,
+          "characters": 98
+        }
+      ]
+    },
+    {
+      "workload": "receipt-image",
+      "workerLimit": 2,
+      "jobs": 8,
+      "completed": 8,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 3.0468,
+      "throughputDocsPerSecond": 2.6257,
+      "latencyP50Seconds": 3.0424,
+      "latencyP95Seconds": 3.046,
+      "minMemoryFreePercent": 41.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001dd2c1fbdc19fb526d8",
+          "status": "completed",
+          "submitSeconds": 0.035,
+          "processingSeconds": 3.0083,
+          "totalSeconds": 3.0433,
+          "characters": 98
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001dd2c22b49177d7b675",
+          "status": "completed",
+          "submitSeconds": 0.038,
+          "processingSeconds": 3.0078,
+          "totalSeconds": 3.0458,
+          "characters": 98
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001dd2c228c5f3566f511",
+          "status": "completed",
+          "submitSeconds": 0.0386,
+          "processingSeconds": 3.0074,
+          "totalSeconds": 3.046,
+          "characters": 98
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001dd2c1df32af1d16456",
+          "status": "completed",
+          "submitSeconds": 0.0317,
+          "processingSeconds": 3.0103,
+          "totalSeconds": 3.042,
+          "characters": 98
+        },
+        {
+          "index": 4,
+          "documentId": "doc_1a001dd2c22280050dd66a7",
+          "status": "completed",
+          "submitSeconds": 0.0354,
+          "processingSeconds": 3.007,
+          "totalSeconds": 3.0424,
+          "characters": 98
+        },
+        {
+          "index": 5,
+          "documentId": "doc_1a001dd2c1e7465d7d3deef",
+          "status": "completed",
+          "submitSeconds": 0.0316,
+          "processingSeconds": 3.0089,
+          "totalSeconds": 3.0405,
+          "characters": 98
+        },
+        {
+          "index": 6,
+          "documentId": "doc_1a001dd2c200c86b476e58b",
+          "status": "completed",
+          "submitSeconds": 0.0334,
+          "processingSeconds": 3.009,
+          "totalSeconds": 3.0424,
+          "characters": 98
+        },
+        {
+          "index": 7,
+          "documentId": "doc_1a001dd2c2251e674ff567e",
+          "status": "completed",
+          "submitSeconds": 0.0368,
+          "processingSeconds": 3.0063,
+          "totalSeconds": 3.0431,
+          "characters": 98
+        }
+      ]
+    },
+    {
+      "workload": "receipt-image",
+      "workerLimit": 3,
+      "jobs": 12,
+      "completed": 12,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 3.059,
+      "throughputDocsPerSecond": 3.9229,
+      "latencyP50Seconds": 3.0519,
+      "latencyP95Seconds": 3.057,
+      "minMemoryFreePercent": 41.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001dd3806816daf02eefe",
+          "status": "completed",
+          "submitSeconds": 0.0337,
+          "processingSeconds": 3.02,
+          "totalSeconds": 3.0537,
+          "characters": 98
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001dd3809ac68a1eb61f8",
+          "status": "completed",
+          "submitSeconds": 0.0359,
+          "processingSeconds": 3.0191,
+          "totalSeconds": 3.055,
+          "characters": 98
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001dd380d27245360eb96",
+          "status": "completed",
+          "submitSeconds": 0.0397,
+          "processingSeconds": 3.0106,
+          "totalSeconds": 3.0504,
+          "characters": 98
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001dd38088d6cca27953b",
+          "status": "completed",
+          "submitSeconds": 0.0336,
+          "processingSeconds": 3.0183,
+          "totalSeconds": 3.0519,
+          "characters": 98
+        },
+        {
+          "index": 4,
+          "documentId": "doc_1a001dd380d4b5ee542ddc4",
+          "status": "completed",
+          "submitSeconds": 0.0505,
+          "processingSeconds": 3.0065,
+          "totalSeconds": 3.057,
+          "characters": 98
+        },
+        {
+          "index": 5,
+          "documentId": "doc_1a001dd380d6b25dc070c17",
+          "status": "completed",
+          "submitSeconds": 0.0412,
+          "processingSeconds": 3.009,
+          "totalSeconds": 3.0502,
+          "characters": 98
+        },
+        {
+          "index": 6,
+          "documentId": "doc_1a001dd380d98e4654e6e62",
+          "status": "completed",
+          "submitSeconds": 0.044,
+          "processingSeconds": 3.0097,
+          "totalSeconds": 3.0537,
+          "characters": 98
+        },
+        {
+          "index": 7,
+          "documentId": "doc_1a001dd380d521ec70ed4ab",
+          "status": "completed",
+          "submitSeconds": 0.0472,
+          "processingSeconds": 3.0073,
+          "totalSeconds": 3.0545,
+          "characters": 98
+        },
+        {
+          "index": 8,
+          "documentId": "doc_1a001dd380dd67794968a12",
+          "status": "completed",
+          "submitSeconds": 0.0356,
+          "processingSeconds": 3.0124,
+          "totalSeconds": 3.048,
+          "characters": 98
+        },
+        {
+          "index": 9,
+          "documentId": "doc_1a001dd380d30343cf2b9fe",
+          "status": "completed",
+          "submitSeconds": 0.0445,
+          "processingSeconds": 3.0088,
+          "totalSeconds": 3.0533,
+          "characters": 98
+        },
+        {
+          "index": 10,
+          "documentId": "doc_1a001dd380db246b0f51689",
+          "status": "completed",
+          "submitSeconds": 0.0404,
+          "processingSeconds": 3.0114,
+          "totalSeconds": 3.0518,
+          "characters": 98
+        },
+        {
+          "index": 11,
+          "documentId": "doc_1a001dd380d432ecfaafeed",
+          "status": "completed",
+          "submitSeconds": 0.0372,
+          "processingSeconds": 3.0125,
+          "totalSeconds": 3.0498,
+          "characters": 98
+        }
+      ]
+    },
+    {
+      "workload": "receipt-image",
+      "workerLimit": 4,
+      "jobs": 16,
+      "completed": 16,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 3.0633,
+      "throughputDocsPerSecond": 5.2231,
+      "latencyP50Seconds": 3.0521,
+      "latencyP95Seconds": 3.057,
+      "minMemoryFreePercent": 42.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001dd4401fcaaed70818b",
+          "status": "completed",
+          "submitSeconds": 0.041,
+          "processingSeconds": 3.0086,
+          "totalSeconds": 3.0496,
+          "characters": 98
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001dd4401e18dedba0ca7",
+          "status": "completed",
+          "submitSeconds": 0.0376,
+          "processingSeconds": 3.0099,
+          "totalSeconds": 3.0475,
+          "characters": 98
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001dd440089d8b4c6e39c",
+          "status": "completed",
+          "submitSeconds": 0.0364,
+          "processingSeconds": 3.0091,
+          "totalSeconds": 3.0455,
+          "characters": 98
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001dd43ff1b9e15e31000",
+          "status": "completed",
+          "submitSeconds": 0.0345,
+          "processingSeconds": 3.0108,
+          "totalSeconds": 3.0453,
+          "characters": 98
+        },
+        {
+          "index": 4,
+          "documentId": "doc_1a001dd4401e07e40b5dd33",
+          "status": "completed",
+          "submitSeconds": 0.0387,
+          "processingSeconds": 3.0093,
+          "totalSeconds": 3.048,
+          "characters": 98
+        },
+        {
+          "index": 5,
+          "documentId": "doc_1a001dd44077e75040ab04f",
+          "status": "completed",
+          "submitSeconds": 0.0464,
+          "processingSeconds": 3.0073,
+          "totalSeconds": 3.0538,
+          "characters": 98
+        },
+        {
+          "index": 6,
+          "documentId": "doc_1a001dd4406160a434d05ef",
+          "status": "completed",
+          "submitSeconds": 0.043,
+          "processingSeconds": 3.0103,
+          "totalSeconds": 3.0533,
+          "characters": 98
+        },
+        {
+          "index": 7,
+          "documentId": "doc_1a001dd4407be020cea1043",
+          "status": "completed",
+          "submitSeconds": 0.0433,
+          "processingSeconds": 3.0096,
+          "totalSeconds": 3.0529,
+          "characters": 98
+        },
+        {
+          "index": 8,
+          "documentId": "doc_1a001dd440845839b77fe65",
+          "status": "completed",
+          "submitSeconds": 0.0465,
+          "processingSeconds": 3.0062,
+          "totalSeconds": 3.0527,
+          "characters": 98
+        },
+        {
+          "index": 9,
+          "documentId": "doc_1a001dd4406827de037dcd4",
+          "status": "completed",
+          "submitSeconds": 0.0392,
+          "processingSeconds": 3.0073,
+          "totalSeconds": 3.0465,
+          "characters": 98
+        },
+        {
+          "index": 10,
+          "documentId": "doc_1a001dd4407e72823a82c3c",
+          "status": "completed",
+          "submitSeconds": 0.0463,
+          "processingSeconds": 3.0107,
+          "totalSeconds": 3.057,
+          "characters": 98
+        },
+        {
+          "index": 11,
+          "documentId": "doc_1a001dd4409e7da4940acb9",
+          "status": "completed",
+          "submitSeconds": 0.0465,
+          "processingSeconds": 3.0099,
+          "totalSeconds": 3.0563,
+          "characters": 98
+        },
+        {
+          "index": 12,
+          "documentId": "doc_1a001dd440ae6e4cb2dacfe",
+          "status": "completed",
+          "submitSeconds": 0.0464,
+          "processingSeconds": 3.0095,
+          "totalSeconds": 3.0559,
+          "characters": 98
+        },
+        {
+          "index": 13,
+          "documentId": "doc_1a001dd440c2f76280727b3",
+          "status": "completed",
+          "submitSeconds": 0.0441,
+          "processingSeconds": 3.0096,
+          "totalSeconds": 3.0537,
+          "characters": 98
+        },
+        {
+          "index": 14,
+          "documentId": "doc_1a001dd440a902614d38094",
+          "status": "completed",
+          "submitSeconds": 0.0393,
+          "processingSeconds": 3.0077,
+          "totalSeconds": 3.047,
+          "characters": 98
+        },
+        {
+          "index": 15,
+          "documentId": "doc_1a001dd440cd003ffcac843",
+          "status": "completed",
+          "submitSeconds": 0.0448,
+          "processingSeconds": 3.0072,
+          "totalSeconds": 3.0521,
+          "characters": 98
+        }
+      ]
+    },
+    {
+      "workload": "receipt-image",
+      "workerLimit": 6,
+      "jobs": 18,
+      "completed": 18,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 3.0716,
+      "throughputDocsPerSecond": 5.8602,
+      "latencyP50Seconds": 3.0566,
+      "latencyP95Seconds": 3.0679,
+      "minMemoryFreePercent": 42.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001dd5000621ae8977f1e",
+          "status": "completed",
+          "submitSeconds": 0.0562,
+          "processingSeconds": 3.0059,
+          "totalSeconds": 3.0621,
+          "characters": 98
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001dd4ffb1a31ab361ea2",
+          "status": "completed",
+          "submitSeconds": 0.0446,
+          "processingSeconds": 3.0116,
+          "totalSeconds": 3.0562,
+          "characters": 98
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001dd4ffa5c12e1749f56",
+          "status": "completed",
+          "submitSeconds": 0.0429,
+          "processingSeconds": 3.013,
+          "totalSeconds": 3.056,
+          "characters": 98
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001dd4fffdd0745dab62d",
+          "status": "completed",
+          "submitSeconds": 0.0464,
+          "processingSeconds": 3.0101,
+          "totalSeconds": 3.0566,
+          "characters": 98
+        },
+        {
+          "index": 4,
+          "documentId": "doc_1a001dd4ffe55e068da1ea6",
+          "status": "completed",
+          "submitSeconds": 0.0538,
+          "processingSeconds": 3.0084,
+          "totalSeconds": 3.0622,
+          "characters": 98
+        },
+        {
+          "index": 5,
+          "documentId": "doc_1a001dd5000ba7a64037c99",
+          "status": "completed",
+          "submitSeconds": 0.0442,
+          "processingSeconds": 3.0111,
+          "totalSeconds": 3.0553,
+          "characters": 98
+        },
+        {
+          "index": 6,
+          "documentId": "doc_1a001dd5001619835ad6bb6",
+          "status": "completed",
+          "submitSeconds": 0.0477,
+          "processingSeconds": 3.0113,
+          "totalSeconds": 3.059,
+          "characters": 98
+        },
+        {
+          "index": 7,
+          "documentId": "doc_1a001dd4fff967e993e3db8",
+          "status": "completed",
+          "submitSeconds": 0.0591,
+          "processingSeconds": 3.0087,
+          "totalSeconds": 3.0679,
+          "characters": 98
+        },
+        {
+          "index": 8,
+          "documentId": "doc_1a001dd500382c841a87a09",
+          "status": "completed",
+          "submitSeconds": 0.0505,
+          "processingSeconds": 3.0074,
+          "totalSeconds": 3.0579,
+          "characters": 98
+        },
+        {
+          "index": 9,
+          "documentId": "doc_1a001dd5000914db28a6290",
+          "status": "completed",
+          "submitSeconds": 0.0449,
+          "processingSeconds": 3.0089,
+          "totalSeconds": 3.0537,
+          "characters": 98
+        },
+        {
+          "index": 10,
+          "documentId": "doc_1a001dd50085e638ea07ab2",
+          "status": "completed",
+          "submitSeconds": 0.0537,
+          "processingSeconds": 3.0115,
+          "totalSeconds": 3.0652,
+          "characters": 98
+        },
+        {
+          "index": 11,
+          "documentId": "doc_1a001dd5003a5cf28b8c89b",
+          "status": "completed",
+          "submitSeconds": 0.0523,
+          "processingSeconds": 3.012,
+          "totalSeconds": 3.0642,
+          "characters": 98
+        },
+        {
+          "index": 12,
+          "documentId": "doc_1a001dd500471e9361b14b3",
+          "status": "completed",
+          "submitSeconds": 0.0459,
+          "processingSeconds": 3.0084,
+          "totalSeconds": 3.0543,
+          "characters": 98
+        },
+        {
+          "index": 13,
+          "documentId": "doc_1a001dd50057e77204c3e10",
+          "status": "completed",
+          "submitSeconds": 0.0441,
+          "processingSeconds": 3.0098,
+          "totalSeconds": 3.0539,
+          "characters": 98
+        },
+        {
+          "index": 14,
+          "documentId": "doc_1a001dd5004c72521624e54",
+          "status": "completed",
+          "submitSeconds": 0.054,
+          "processingSeconds": 3.0097,
+          "totalSeconds": 3.0637,
+          "characters": 98
+        },
+        {
+          "index": 15,
+          "documentId": "doc_1a001dd5006d064d8e7f543",
+          "status": "completed",
+          "submitSeconds": 0.049,
+          "processingSeconds": 3.0065,
+          "totalSeconds": 3.0555,
+          "characters": 98
+        },
+        {
+          "index": 16,
+          "documentId": "doc_1a001dd50049d316d47dc4b",
+          "status": "completed",
+          "submitSeconds": 0.0389,
+          "processingSeconds": 3.0107,
+          "totalSeconds": 3.0496,
+          "characters": 98
+        },
+        {
+          "index": 17,
+          "documentId": "doc_1a001dd50012a2b88cef0c7",
+          "status": "completed",
+          "submitSeconds": 0.0511,
+          "processingSeconds": 3.0104,
+          "totalSeconds": 3.0615,
+          "characters": 98
+        }
+      ]
+    },
+    {
+      "workload": "10-page-pdf",
+      "workerLimit": 1,
+      "jobs": 2,
+      "completed": 2,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 24.1047,
+      "throughputDocsPerSecond": 0.083,
+      "latencyP50Seconds": 12.0763,
+      "latencyP95Seconds": 24.1033,
+      "minMemoryFreePercent": 42.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001dd5c0000bf8c69df42",
+          "status": "completed",
+          "submitSeconds": 0.0417,
+          "processingSeconds": 12.0346,
+          "totalSeconds": 12.0763,
+          "characters": 1356
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001dd5c02edab91eee5b7",
+          "status": "completed",
+          "submitSeconds": 0.0413,
+          "processingSeconds": 24.0619,
+          "totalSeconds": 24.1033,
+          "characters": 1356
+        }
+      ]
+    },
+    {
+      "workload": "10-page-pdf",
+      "workerLimit": 2,
+      "jobs": 4,
+      "completed": 4,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 45.1775,
+      "throughputDocsPerSecond": 0.0885,
+      "latencyP50Seconds": 24.1239,
+      "latencyP95Seconds": 45.174,
+      "minMemoryFreePercent": 42.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001ddba39dca6ab977093",
+          "status": "completed",
+          "submitSeconds": 0.0575,
+          "processingSeconds": 12.0394,
+          "totalSeconds": 12.0969,
+          "characters": 1356
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001ddba3babfad889dff9",
+          "status": "completed",
+          "submitSeconds": 0.0585,
+          "processingSeconds": 24.0653,
+          "totalSeconds": 24.1239,
+          "characters": 1356
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001ddba3b89425ec80a21",
+          "status": "completed",
+          "submitSeconds": 0.0584,
+          "processingSeconds": 45.1156,
+          "totalSeconds": 45.174,
+          "characters": 1356
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001ddba3b2dc74a11afe0",
+          "status": "completed",
+          "submitSeconds": 0.0585,
+          "processingSeconds": 36.0892,
+          "totalSeconds": 36.1477,
+          "characters": 1356
+        }
+      ]
+    },
+    {
+      "workload": "10-page-pdf",
+      "workerLimit": 3,
+      "jobs": 6,
+      "completed": 6,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 69.256,
+      "throughputDocsPerSecond": 0.0866,
+      "latencyP50Seconds": 36.1625,
+      "latencyP95Seconds": 69.2486,
+      "minMemoryFreePercent": 42.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001de6ac0d1a8bb54b75f",
+          "status": "completed",
+          "submitSeconds": 0.0665,
+          "processingSeconds": 12.0372,
+          "totalSeconds": 12.1038,
+          "characters": 1356
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001de6ac41eef53c5638d",
+          "status": "completed",
+          "submitSeconds": 0.0674,
+          "processingSeconds": 24.0622,
+          "totalSeconds": 24.1297,
+          "characters": 1356
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001de6ac742f44c664f29",
+          "status": "completed",
+          "submitSeconds": 0.0745,
+          "processingSeconds": 57.1436,
+          "totalSeconds": 57.2181,
+          "characters": 1356
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001de6ac78df3cf5c4b08",
+          "status": "completed",
+          "submitSeconds": 0.0694,
+          "processingSeconds": 45.1136,
+          "totalSeconds": 45.1829,
+          "characters": 1356
+        },
+        {
+          "index": 4,
+          "documentId": "doc_1a001de6ac718e37b5d19b9",
+          "status": "completed",
+          "submitSeconds": 0.0701,
+          "processingSeconds": 36.0924,
+          "totalSeconds": 36.1625,
+          "characters": 1356
+        },
+        {
+          "index": 5,
+          "documentId": "doc_1a001de6ac88a51c684c5e2",
+          "status": "completed",
+          "submitSeconds": 0.0671,
+          "processingSeconds": 69.1814,
+          "totalSeconds": 69.2486,
+          "characters": 1356
+        }
+      ]
+    },
+    {
+      "workload": "10-page-pdf",
+      "workerLimit": 4,
+      "jobs": 8,
+      "completed": 8,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 93.3695,
+      "throughputDocsPerSecond": 0.0857,
+      "latencyP50Seconds": 48.2346,
+      "latencyP95Seconds": 93.3602,
+      "minMemoryFreePercent": 43.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001df79598595f6746dd0",
+          "status": "completed",
+          "submitSeconds": 0.0796,
+          "processingSeconds": 36.1251,
+          "totalSeconds": 36.2047,
+          "characters": 1356
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001df795f614e72a9a8b8",
+          "status": "completed",
+          "submitSeconds": 0.0832,
+          "processingSeconds": 69.2147,
+          "totalSeconds": 69.2979,
+          "characters": 1356
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001df7954312a9dbc8aba",
+          "status": "completed",
+          "submitSeconds": 0.0737,
+          "processingSeconds": 12.0438,
+          "totalSeconds": 12.1175,
+          "characters": 1356
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001df795fe5f9029f65a7",
+          "status": "completed",
+          "submitSeconds": 0.081,
+          "processingSeconds": 57.174,
+          "totalSeconds": 57.255,
+          "characters": 1356
+        },
+        {
+          "index": 4,
+          "documentId": "doc_1a001df795a8a1d70e91bfb",
+          "status": "completed",
+          "submitSeconds": 0.0755,
+          "processingSeconds": 24.0853,
+          "totalSeconds": 24.1608,
+          "characters": 1356
+        },
+        {
+          "index": 5,
+          "documentId": "doc_1a001df795c58f45fcf9235",
+          "status": "completed",
+          "submitSeconds": 0.0754,
+          "processingSeconds": 48.1593,
+          "totalSeconds": 48.2346,
+          "characters": 1356
+        },
+        {
+          "index": 6,
+          "documentId": "doc_1a001df7960a8f4153bf9a3",
+          "status": "completed",
+          "submitSeconds": 0.0778,
+          "processingSeconds": 93.2824,
+          "totalSeconds": 93.3602,
+          "characters": 1356
+        },
+        {
+          "index": 7,
+          "documentId": "doc_1a001df795f790f85ac149d",
+          "status": "completed",
+          "submitSeconds": 0.0757,
+          "processingSeconds": 81.2446,
+          "totalSeconds": 81.3203,
+          "characters": 1356
+        }
+      ]
+    },
+    {
+      "workload": "10-page-pdf",
+      "workerLimit": 6,
+      "jobs": 12,
+      "completed": 12,
+      "failed": 0,
+      "successRate": 1.0,
+      "wallSeconds": 138.5092,
+      "throughputDocsPerSecond": 0.0866,
+      "latencyP50Seconds": 69.2962,
+      "latencyP95Seconds": 138.5035,
+      "minMemoryFreePercent": 43.0,
+      "records": [
+        {
+          "index": 0,
+          "documentId": "doc_1a001e0e60dbd2947b95c1d",
+          "status": "completed",
+          "submitSeconds": 0.0718,
+          "processingSeconds": 12.0377,
+          "totalSeconds": 12.1095,
+          "characters": 1356
+        },
+        {
+          "index": 1,
+          "documentId": "doc_1a001e0e6121ba49d30e436",
+          "status": "completed",
+          "submitSeconds": 0.0746,
+          "processingSeconds": 24.0613,
+          "totalSeconds": 24.1359,
+          "characters": 1356
+        },
+        {
+          "index": 2,
+          "documentId": "doc_1a001e0e63160b445261f39",
+          "status": "completed",
+          "submitSeconds": 0.1037,
+          "processingSeconds": 48.1305,
+          "totalSeconds": 48.2343,
+          "characters": 1356
+        },
+        {
+          "index": 3,
+          "documentId": "doc_1a001e0e629653081be74a1",
+          "status": "completed",
+          "submitSeconds": 0.0955,
+          "processingSeconds": 36.1112,
+          "totalSeconds": 36.2067,
+          "characters": 1356
+        },
+        {
+          "index": 4,
+          "documentId": "doc_1a001e0e63c8903baceedf7",
+          "status": "completed",
+          "submitSeconds": 0.1141,
+          "processingSeconds": 138.3894,
+          "totalSeconds": 138.5035,
+          "characters": 1356
+        },
+        {
+          "index": 5,
+          "documentId": "doc_1a001e0e635296f5a46af15",
+          "status": "completed",
+          "submitSeconds": 0.1041,
+          "processingSeconds": 81.2387,
+          "totalSeconds": 81.3428,
+          "characters": 1356
+        },
+        {
+          "index": 6,
+          "documentId": "doc_1a001e0e6394177deb54bfc",
+          "status": "completed",
+          "submitSeconds": 0.1076,
+          "processingSeconds": 105.3039,
+          "totalSeconds": 105.4115,
+          "characters": 1356
+        },
+        {
+          "index": 7,
+          "documentId": "doc_1a001e0e632b78f78f1c89b",
+          "status": "completed",
+          "submitSeconds": 0.098,
+          "processingSeconds": 60.1744,
+          "totalSeconds": 60.2724,
+          "characters": 1356
+        },
+        {
+          "index": 8,
+          "documentId": "doc_1a001e0e63b0bb2463f1977",
+          "status": "completed",
+          "submitSeconds": 0.1076,
+          "processingSeconds": 126.3622,
+          "totalSeconds": 126.4698,
+          "characters": 1356
+        },
+        {
+          "index": 9,
+          "documentId": "doc_1a001e0e6391a1bdd360d8a",
+          "status": "completed",
+          "submitSeconds": 0.1052,
+          "processingSeconds": 114.3265,
+          "totalSeconds": 114.4317,
+          "characters": 1356
+        },
+        {
+          "index": 10,
+          "documentId": "doc_1a001e0e6384248724bc9f5",
+          "status": "completed",
+          "submitSeconds": 0.0995,
+          "processingSeconds": 69.1966,
+          "totalSeconds": 69.2962,
+          "characters": 1356
+        },
+        {
+          "index": 11,
+          "documentId": "doc_1a001e0e638a574611878ed",
+          "status": "completed",
+          "submitSeconds": 0.099,
+          "processingSeconds": 93.2626,
+          "totalSeconds": 93.3616,
+          "characters": 1356
+        }
+      ]
+    }
+  ],
+  "environment": {
+    "capturedAt": "2026-08-14T19:59:34Z",
+    "hardware": {
+      "model": "Mac mini",
+      "chip": "Apple M4 Pro",
+      "cores": "12 (8 Performance and 4 Efficiency)",
+      "memory": "48 GB"
+    },
+    "services": {
+      "proxyReady": true,
+      "nativeCapacity": {
+        "configVersion": 1,
+        "state": "ready",
+        "operatorLimit": 3,
+        "effectiveLimit": 3,
+        "active": 0,
+        "available": 3
+      }
+    },
+    "llmWorkerDetected": true,
+    "secretsIncluded": false
+  }
+}
