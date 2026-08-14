@@ -122,14 +122,14 @@ func TestBusyWorkerReleasesAttemptWithoutConsumingRetry(t *testing.T) {
 	}
 }
 
-func TestInvalidWorkerAcceptanceConsumesRetryAndRequeues(t *testing.T) {
+func TestInvalidWorkerAcceptanceKeepsAttemptLeased(t *testing.T) {
 	httpClient := &http.Client{Transport: schedulerRoundTrip(func(request *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"attemptId":"wrong","status":"accepted"}`)), Request: request}, nil
 	})}
 	repo := &schedulerDocRepo{doc: &domain.Document{ID: "doc_test", UserID: 1, Status: domain.StatusQueued, InputKey: "input", InputSHA256: strings.Repeat("a", 64)}}
 	s := New(repo, schedulerObjects{url: "https://storage.test/input"}, native.NewClientWithHTTPClient("http://worker.test", "secret", httpClient), auth.NewService(nil, nil, nil, nil), "https://proxy.test/webhooks/native/events", slog.New(slog.NewTextHandler(io.Discard, nil)), time.Minute, 3)
 	s.pollAndDispatch(context.Background())
-	if repo.requeued != 1 || repo.released != 0 || repo.doc.AttemptCount != 1 || repo.doc.Status != domain.StatusQueued {
-		t.Fatalf("invalid acceptance did not consume one retry: %+v requeued=%d released=%d", repo.doc, repo.requeued, repo.released)
+	if repo.requeued != 0 || repo.released != 0 || repo.doc.AttemptCount != 1 || repo.doc.Status != domain.StatusProcessing || repo.doc.ProcessingUntil == nil {
+		t.Fatalf("ambiguous acceptance was not kept leased: %+v requeued=%d released=%d", repo.doc, repo.requeued, repo.released)
 	}
 }

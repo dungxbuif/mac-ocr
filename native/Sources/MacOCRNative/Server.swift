@@ -406,11 +406,21 @@ public final class NativeHTTPServer {
 
                 let response = AcceptedResponse(attemptId: ocrReq.attemptId)
                 let acceptedJSON = (try? JSONEncoder().encode(response)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                sendResponse(connection: connection, status: 202, body: acceptedJSON)
                 logger(.info, "OCR accepted document=\(ocrReq.documentId) attempt=\(ocrReq.attemptId) active=\(cap.active)")
 
-                Task.detached { [self] in
-                    await self.state.processOCR(request: ocrReq)
+                // Flush the acknowledgement before starting synchronous Vision
+                // work. Large PDFs can monopolize worker threads long enough for
+                // the proxy's HTTP timeout to expire, creating an ambiguous
+                // dispatch and duplicate OCR attempts.
+                sendResponse(connection: connection, status: 202, body: acceptedJSON) { [self] sendError in
+                    if let sendError {
+                        logger(.error, "OCR acknowledgement failed document=\(ocrReq.documentId): \(sendError.localizedDescription)")
+                        Task { _ = await state.releaseSlot() }
+                        return
+                    }
+                    Task.detached { [self] in
+                        await self.state.processOCR(request: ocrReq)
+                    }
                 }
                 return
             }
@@ -419,7 +429,13 @@ public final class NativeHTTPServer {
         }
     }
 
-    private func sendResponse(connection: NWConnection, status: Int, headers: [String: String] = [:], body: String) {
+    private func sendResponse(
+        connection: NWConnection,
+        status: Int,
+        headers: [String: String] = [:],
+        body: String,
+        completion: ((NWError?) -> Void)? = nil
+    ) {
         let statusText: String
         switch status {
         case 200: statusText = "OK"
@@ -449,7 +465,8 @@ public final class NativeHTTPServer {
         var responseData = Data(headerLines.joined(separator: "\r\n").utf8)
         responseData.append(bodyData)
 
-        connection.send(content: responseData, completion: .contentProcessed({ _ in
+        connection.send(content: responseData, completion: .contentProcessed({ error in
+            completion?(error)
             connection.cancel()
         }))
     }

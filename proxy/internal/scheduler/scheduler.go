@@ -120,8 +120,12 @@ func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 			return
 		}
 
-		s.logger.Error("native dispatch failed", "docID", doc.ID, "error", err)
-		s.retryOrFail(ctx, doc, "OCR worker dispatch failed after retry")
+		// Any non-busy error after sending the request has an ambiguous
+		// outcome: the worker may have accepted it even when its acknowledgement
+		// was lost or malformed. Keep the attempt leased so a late signed
+		// callback can finalize it. Requeueing immediately can run the same
+		// expensive document more than once and make valid callbacks conflict.
+		s.logger.Error("native dispatch acknowledgement unknown; keeping attempt leased", "docID", doc.ID, "attemptID", attemptID, "error", err)
 		return
 	}
 
