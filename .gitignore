@@ -37,3 +37,12 @@ local-dev/s3/package-lock.json
 
 # Local OCR evaluation reports
 .ocr-eval/
+
+# Submodules / Local clones
+mezon-sdk-go/
+
+# OmniScan local runtime files
+omniscan/*.db
+omniscan/*.lock
+omniscan/omniscan
+
