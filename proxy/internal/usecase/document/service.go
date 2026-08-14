@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"macocr/proxy/domain"
@@ -77,7 +78,9 @@ func (s *Service) SubmitSingle(
 
 	created, err := s.docs.CreateWithQuota(ctx, &doc)
 	if err != nil {
-		_ = s.objects.Delete(ctx, doc.InputKey)
+		if !isReservedUploadKey(doc.UserID, doc.InputKey) {
+			_ = s.objects.Delete(ctx, doc.InputKey)
+		}
 		return nil, err
 	}
 	s.auth.InvalidateAccountConfig(ctx, userID)
@@ -120,10 +123,14 @@ func (s *Service) SubmitBatch(
 
 func (s *Service) cleanupPreparedInputs(ctx context.Context, docs []domain.Document) {
 	for i := range docs {
-		if docs[i].InputKey != "" {
+		if docs[i].InputKey != "" && !isReservedUploadKey(docs[i].UserID, docs[i].InputKey) {
 			_ = s.objects.Delete(ctx, docs[i].InputKey)
 		}
 	}
+}
+
+func isReservedUploadKey(userID int64, key string) bool {
+	return strings.HasPrefix(key, fmt.Sprintf("uploads/%d/", userID))
 }
 
 func (s *Service) prepareQueuedDocument(

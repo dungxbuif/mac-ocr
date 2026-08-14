@@ -41,6 +41,26 @@ type retentionObjects struct {
 	deleted []string
 }
 
+type retentionReservations struct {
+	items          []domain.UploadReservation
+	released       map[string]bool
+	releaseResults map[string]bool
+}
+
+func (r *retentionReservations) ReserveUpload(context.Context, domain.UploadReservation) error {
+	return nil
+}
+func (r *retentionReservations) ListExpiredUploads(context.Context, time.Time, int) ([]domain.UploadReservation, error) {
+	return r.items, nil
+}
+func (r *retentionReservations) ReleaseUpload(_ context.Context, _ int64, key string) (bool, error) {
+	didRelease := r.releaseResults[key]
+	if didRelease {
+		r.released[key] = true
+	}
+	return didRelease, nil
+}
+
 func (r *retentionObjects) Put(context.Context, string, io.Reader, string) error { return nil }
 func (r *retentionObjects) Get(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(nil)), nil
@@ -82,5 +102,25 @@ func TestCleanupDeletesTerminalMetadataAndOnlyOrphanUploads(t *testing.T) {
 	}
 	if len(wantDeleted) != 0 {
 		t.Fatalf("expected object deletions were not performed: %v; got %v", wantDeleted, objects.deleted)
+	}
+}
+
+func TestReservationCleanupDeletesOnlyWhenAtomicReleaseWins(t *testing.T) {
+	objects := &retentionObjects{}
+	reservations := &retentionReservations{
+		items: []domain.UploadReservation{
+			{ObjectKey: "uploads/1/released", UserID: 1},
+			{ObjectKey: "uploads/1/consumed", UserID: 1},
+		},
+		released:       map[string]bool{},
+		releaseResults: map[string]bool{"uploads/1/released": true, "uploads/1/consumed": false},
+	}
+	worker := New(&retentionDocs{}, nil, objects, slog.New(slog.NewTextHandler(io.Discard, nil)), time.Hour, time.Hour, time.Hour, time.Hour, reservations)
+
+	if got := worker.cleanupExpiredReservations(context.Background()); got != 1 {
+		t.Fatalf("released reservations = %d, want 1", got)
+	}
+	if len(objects.deleted) != 1 || objects.deleted[0] != "uploads/1/released" {
+		t.Fatalf("deleted objects = %v; consumed reservation object must be preserved", objects.deleted)
 	}
 }

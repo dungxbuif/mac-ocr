@@ -56,7 +56,7 @@ Apple references: [Recognizing text in images](https://developer.apple.com/docum
   },
   "resultExpiresAt": "2026-08-22T08:30:04Z",
   "links": [
-    {"rel": "self", "href": "https://ocr.example.com/v1/documents/doc_18f673199c0"}
+    {"rel": "self", "href": "https://ocr.dungxbuif.com/v1/documents/doc_18f673199c0"}
   ]
 }
 ```

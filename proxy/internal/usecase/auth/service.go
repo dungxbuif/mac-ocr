@@ -64,6 +64,7 @@ func (s *Service) CreateUser(
 	password string,
 	initialRateLimit *int,
 	initialDocQuota *int64,
+	initialStorageQuotaBytes ...*int64,
 ) (*domain.User, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	if email == "" {
@@ -85,7 +86,11 @@ func (s *Service) CreateUser(
 		return nil, err
 	}
 
-	if initialRateLimit != nil || initialDocQuota != nil {
+	var storageQuota *int64
+	if len(initialStorageQuotaBytes) > 0 {
+		storageQuota = initialStorageQuotaBytes[0]
+	}
+	if initialRateLimit != nil || initialDocQuota != nil || storageQuota != nil {
 		cfg, err := s.configs.GetByUserID(ctx, created.ID)
 		if err == nil && cfg != nil {
 			if initialRateLimit != nil && *initialRateLimit >= 0 {
@@ -93,6 +98,9 @@ func (s *Service) CreateUser(
 			}
 			if initialDocQuota != nil && *initialDocQuota >= 0 {
 				cfg.DocQuota = *initialDocQuota
+			}
+			if storageQuota != nil && *storageQuota >= 0 {
+				cfg.StorageQuotaBytes = *storageQuota
 			}
 			updatedCfg, updateErr := s.configs.Update(ctx, cfg)
 			if updateErr == nil {
@@ -176,6 +184,7 @@ func (s *Service) UpdateAccountConfig(
 	rateLimitRPM *int,
 	docQuota *int64,
 	adminID *int64,
+	storageQuotaBytes ...*int64,
 ) (*domain.AccountConfig, error) {
 	cfg, err := s.getConfig(ctx, userID)
 	if err != nil {
@@ -193,6 +202,15 @@ func (s *Service) UpdateAccountConfig(
 			return nil, domain.ErrBadParamInput
 		}
 		cfg.DocQuota = *docQuota
+	}
+	if len(storageQuotaBytes) > 0 && storageQuotaBytes[0] != nil {
+		if *storageQuotaBytes[0] < 0 {
+			return nil, domain.ErrBadParamInput
+		}
+		if *storageQuotaBytes[0] > 0 && *storageQuotaBytes[0] < cfg.StorageUsedBytes+cfg.StorageReservedBytes {
+			return nil, domain.ErrStorageQuotaExceeded
+		}
+		cfg.StorageQuotaBytes = *storageQuotaBytes[0]
 	}
 	cfg.UpdatedBy = adminID
 

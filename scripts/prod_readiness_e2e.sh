@@ -421,6 +421,24 @@ status="$(request POST "/v1/documents" "{\"input\":{\"base64\":\"$PNG_B64\"}}" "
 expect_status "document quota enforced" "$status" "429"
 expect_code "document quota enforced" "QUOTA_EXCEEDED"
 
+STORAGE_USER_EMAIL="storage-$RUN_ID@example.test"
+STORAGE_USER_OUTPUT="$(cd "$PROXY_DIR" && go run ./cmd/admin create-user --email "$STORAGE_USER_EMAIL" --rate 30 --quota 5 --storage-bytes "$PDF_SIZE")"
+STORAGE_USER_ID="$(printf '%s\n' "$STORAGE_USER_OUTPUT" | awk -F: '/ID:/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')"
+STORAGE_KEY_OUTPUT="$(cd "$PROXY_DIR" && go run ./cmd/admin create-key --user-id "$STORAGE_USER_ID" --name storage --rate 30)"
+STORAGE_KEY="$(printf '%s\n' "$STORAGE_KEY_OUTPUT" | awk -F'API Key:[[:space:]]*' '/API Key:/ {print $2; exit}')"
+status="$(request POST "/v1/uploads/presign" "$PRESIGN_BODY" "$STORAGE_KEY")"
+expect_status "storage quota presign reservation" "$status" "201"
+STORAGE_UPLOAD_URL="$(jq -r '.uploadUrl' "$TMP_DIR/response.json")"
+STORAGE_SOURCE_URL="$(jq -r '.sourceUrl' "$TMP_DIR/response.json")"
+curl -fsS -X PUT "$STORAGE_UPLOAD_URL" -H "Content-Type: application/pdf" --data-binary "@$TMP_DIR/sample.pdf" >/dev/null
+status="$(request POST "/v1/documents" "$(jq -n --arg url "$STORAGE_SOURCE_URL" '{input:{url:$url}}')" "$STORAGE_KEY")"
+expect_status "storage reservation converted to usage" "$status" "202"
+STORAGE_DOC="$(jq -r '.documentId' "$TMP_DIR/response.json")"
+poll_completed "$STORAGE_DOC" "$STORAGE_KEY" 1
+status="$(request POST "/v1/uploads/presign" '{"filename":"over-storage-quota.bin","sizeBytes":1}' "$STORAGE_KEY")"
+expect_status "aggregate storage quota enforced" "$status" "429"
+expect_code "aggregate storage quota enforced" "STORAGE_QUOTA_EXCEEDED"
+
 (cd "$PROXY_DIR" && go run ./cmd/admin revoke-key --user-id "$USER_ID" --key-id "$KEY_ID") >/dev/null
 status="$(request GET "/v1/documents/$PNG_DOC" "" "$API_KEY")"
 expect_status "revoked key blocked" "$status" "401"

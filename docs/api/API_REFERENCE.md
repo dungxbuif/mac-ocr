@@ -73,19 +73,25 @@ Response:
   },
   "sizeBytes": 73400320,
   "maxUploadBytes": 104857600,
-  "expiresAt": "2026-08-14T14:15:00Z"
+  "expiresAt": "2026-08-14T14:15:00Z",
+  "reservationExpiresAt": "2026-08-15T14:00:00Z"
 }
 ```
 
 `POST /v1/uploads/presign` does not receive the file bytes. Upload the exact file directly to `uploadUrl` with the returned `PUT` method and every returned header, then submit OCR with `{"input":{"url":"<sourceUrl>"}}`. Do not send the OCR API key to `uploadUrl`; its temporary authorization is already encoded in the signed URL. `uploadUrl` is the external upload destination, while `sourceUrl` is the app-owned internal reference accepted by OCR submission.
 
-The presigned SigV4 request binds the declared size as `Content-Length`; a production-equivalent S3 service must reject a different length. The service also accepts only `sourceUrl` values whose bucket and key prefix belong to the authenticated user, checks object metadata, and streams the uploaded bytes during OCR submission under the same hard ceiling. A client therefore cannot bypass the limit by declaring a small `sizeBytes` and later submitting a larger object. Quota is reserved only after the uploaded object is present, size-checked, content-sniffed, and structurally validated.
+The presigned SigV4 request binds the declared size as `Content-Length`; a production-equivalent S3 service must reject a different length. The service also accepts only `sourceUrl` values whose bucket and key prefix belong to the authenticated user, checks object metadata, and streams the uploaded bytes during OCR submission under the same hard ceiling. A client therefore cannot bypass the limit by declaring a small `sizeBytes` and later submitting a larger object.
+
+Presign creation atomically reserves `sizeBytes` against the account's aggregate storage quota. Concurrent presign calls cannot oversubscribe the quota. On successful document creation the reservation becomes retained-byte usage in the same PostgreSQL transaction as document quota and row creation. An unsubmitted reservation expires at `reservationExpiresAt`; the retention worker deletes any corresponding object and refunds the reserved bytes. `expiresAt` applies only to the temporary PUT URL.
+
+The aggregate check is `storage_used_bytes + storage_reserved_bytes + requested size <= storage_quota_bytes`. Direct URL and Base64 submissions become used bytes when accepted; a presigned upload is reserved first and becomes used only when its `sourceUrl` is submitted. A failed object-storage signing operation is refunded immediately. A failed or abandoned client PUT remains reserved until `reservationExpiresAt`; there is intentionally no public cancel/delete route. If the PUT URL expires before upload, request a new presign only after the old reservation expires or after the account has sufficient remaining quota.
 
 ### Upload size failures
 
 | Failure point | HTTP response | Machine code/body |
 |---|---:|---|
 | Presign `sizeBytes` exceeds `MAX_UPLOAD_BYTES` | `413` from OCR Platform | `URL_CONTENT_TOO_LARGE`, with `limits.maxUploadBytes` |
+| Retained plus reserved bytes would exceed the account quota | `429` from OCR Platform | `STORAGE_QUOTA_EXCEEDED` |
 | Presigned PUT uses a different length or signed header | Usually `403` from object storage | Provider-specific S3 XML; not `application/problem+json` |
 | Submitted app-owned object is actually over the server limit | `413` from OCR Platform | `URL_CONTENT_TOO_LARGE` |
 | Decoded Base64 exceeds 25 MiB | `400` from OCR Platform | `BASE64_TOO_LARGE`, with `limits.maxDecodedBytes` |
@@ -113,7 +119,25 @@ Content-Type: application/problem+json
 }
 ```
 
-The example limit is the default. Follow `rel=capabilities` to discover deployment limits and `rel=presign` to retry after reducing or splitting the file. Clients should read `limits.maxUploadBytes` because a deployment may use another value. A rejected presign does not reserve document quota and does not create an upload URL.
+The example limit is the default. Follow `rel=capabilities` to discover deployment limits and `rel=presign` to retry after reducing or splitting the file. Clients should read `limits.maxUploadBytes` because a deployment may use another value. A rejected presign does not reserve document quota or bytes and does not create an upload URL.
+
+Aggregate quota failure follows the same HATEOAS link-array shape:
+
+```json
+{
+  "type": "about:blank",
+  "code": "STORAGE_QUOTA_EXCEEDED",
+  "status": 429,
+  "title": "Storage quota exceeded",
+  "detail": "storage quota exceeded",
+  "links": [
+    {"rel": "self", "href": "/v1/uploads/presign", "method": "POST"},
+    {"rel": "capabilities", "href": "/v1/ocr/capabilities", "method": "GET"}
+  ]
+}
+```
+
+Honor `Retry-After`, but note that space becomes available only when retained inputs or abandoned reservations expire, or when an administrator raises the account quota.
 
 ## Single document
 
@@ -151,7 +175,7 @@ Response:
   "status": "queued",
   "createdAt": "2026-08-14T13:40:00Z",
   "links": [
-    {"rel": "self", "href": "https://ocr.example.com/v1/documents/doc_18f673199c0"}
+    {"rel": "self", "href": "https://ocr.dungxbuif.com/v1/documents/doc_18f673199c0"}
   ]
 }
 ```

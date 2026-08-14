@@ -16,5 +16,9 @@
   "previous": {
     "title": "MCP integration",
     "permalink": "/api/MCP_INTEGRATION"
+  },
+  "next": {
+    "title": "OmniScan Mezon Bot",
+    "permalink": "/integrations/mezon-bot"
   }
 }

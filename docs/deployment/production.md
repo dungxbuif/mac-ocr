@@ -52,12 +52,12 @@ Build web assets before the Go binary because both are embedded at compile time.
 
 ### Docker Container build
 
-Alternatively, build the containerized proxy image using the multi-stage [Dockerfile](file:///Users/dungxbuif/workspace/mac-ocr/Dockerfile) from the repository root:
+Alternatively, build the containerized proxy image using the multi-stage `Dockerfile` from the repository root:
 
 ```bash
 docker build \
-  --build-arg PUBLIC_API_BASE_URL="https://ocr.example.com" \
-  --build-arg PUBLIC_DOCS_BASE_URL="https://docs.example.com" \
+  --build-arg PUBLIC_API_BASE_URL="https://ocr.dungxbuif.com" \
+  --build-arg PUBLIC_DOCS_BASE_URL="https://ocr.dungxbuif.com" \
   --build-arg APP_ENV="production" \
   --build-arg VERSION="1.0.0" \
   -t macocr-proxy:latest .
@@ -87,9 +87,11 @@ Generate independent high-entropy values for database, Redis, S3, native authent
 4. Verify public `GET /v1/documents` and `DELETE /v1/documents/{id}` return `404`.
 5. Verify OpenAPI advertises `apiKeyAuth`, only document submit/read-by-ID, and three MCP tools.
 6. Verify presigned upload at the size boundary succeeds, `max+1` fails, a mismatched signed content length is rejected by the production S3 provider, and submit-time metadata rejects oversized objects without consuming document quota.
-7. Verify rate limits at both API-key and account levels and quota reservation under concurrent requests.
-8. Verify webhook signatures, SSE resume, MCP resource/task reads, and account isolation.
-9. Verify `RESULT_TTL`, `INPUT_TTL`, `DOCUMENT_TTL`, and `NOTIFICATION_TTL` in a shortened staging run.
+7. Set a nonzero per-account `storage_quota_bytes`; verify concurrent presign calls cannot exceed it, successful submit converts reserved bytes to used bytes, and `UPLOAD_TTL` cleanup refunds abandoned reservations.
+8. Verify rate limits at both API-key and account levels and document quota reservation under concurrent requests.
+9. Verify the native worker reports adaptive weighted capacity, immediately reduces capacity under simulated pressure, recovers only after the configured healthy-sample window, and never cancels accepted work. Confirm the proxy skips PDFs when fewer than `pdfJobUnits` are free while still dispatching eligible images.
+10. Verify webhook signatures, SSE resume, MCP resource/task reads, and account isolation.
+11. Verify `RESULT_TTL`, `INPUT_TTL`, `UPLOAD_TTL`, `DOCUMENT_TTL`, and `NOTIFICATION_TTL` in a shortened staging run.
 
 ## Rollout
 

@@ -59,7 +59,7 @@ Batch submission invokes the same flow in array order, reserves quota for the ar
 
 ## Presigned upload flow
 
-`POST /v1/uploads/presign` is authenticated by API key and creates an object key under `uploads/{userId}/`. The response includes a temporary `PUT uploadUrl` and a stable `sourceUrl` such as `s3://bucket/uploads/{userId}/...`. The service rejects presign requests whose declared `sizeBytes` exceeds `MAX_UPLOAD_BYTES`, but does not trust that declaration as authoritative. During OCR submission it resolves only app-owned source URLs, verifies the user-owned key prefix, checks object metadata, streams the object under the same byte ceiling, detects the real media type from magic bytes, and validates the complete file structure before reserving document quota.
+`POST /v1/uploads/presign` is authenticated by API key and creates an object key under `uploads/{userId}/`. The response includes a temporary `PUT uploadUrl` and a stable `sourceUrl` such as `s3://bucket/uploads/{userId}/...`. PostgreSQL atomically increments `storage_reserved_bytes` and inserts `upload_reservations`; the update succeeds only when `storage_used_bytes + storage_reserved_bytes + sizeBytes` remains within `storage_quota_bytes` (zero means unlimited). During OCR submission the object is ownership-, size-, content-, and structure-validated. Document creation then atomically converts reserved bytes to `storage_used_bytes`, reserves document count, creates the document, and marks the upload reservation consumed. Unsubmitted reservations are deleted and refunded after `UPLOAD_TTL`.
 
 ## JSON contract
 
@@ -104,10 +104,11 @@ Deactivating an account updates the authoritative `users.disabled` flag and inva
 
 ## Scheduler
 
-The scheduler polls once per second and can also be woken by a worker callback. `ClaimNext` atomically transitions the oldest queued document to processing using `FOR UPDATE SKIP LOCKED`. It creates a presigned input URL and calls the worker's `/ocr` endpoint.
+The scheduler polls once per second and can also be woken by a worker callback. It reads `/capacity` before claiming. New native workers report `availableUnits`, `imageJobUnits`, and `pdfJobUnits`; the PostgreSQL claim query skips documents whose weight does not fit, so an older PDF cannot block eligible images while the Mac is under memory or thermal pressure. The selected row is atomically transitioned to processing using `FOR UPDATE SKIP LOCKED`, then the scheduler creates a presigned input URL and calls the worker's `/ocr` endpoint. Older worker contracts fall back to the unweighted claim path, with native `503` as the final race guard.
 
-- Worker busy: return the document to `queued`.
-- Presign or dispatch failure: mark `failed` and refund quota.
+- Worker busy after a capacity race: release the attempt back to `queued` without consuming retry budget.
+- Presign failure: retry within the configured attempt budget, then fail and refund document quota.
+- Ambiguous dispatch acknowledgement: retain the processing lease so a valid late callback can finalize the attempt without duplicate OCR.
 - Accepted dispatch: persist the attempt ID and await callback.
 
 ## Worker callback

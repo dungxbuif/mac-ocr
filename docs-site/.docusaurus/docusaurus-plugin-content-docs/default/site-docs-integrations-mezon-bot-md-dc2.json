@@ -1,0 +1,24 @@
+{
+  "id": "integrations/mezon-bot",
+  "title": "OmniScan Mezon Bot",
+  "description": "OmniScan is an automated AI-powered Mezon platform bot written in Go that connects to the mac-ocr proxy backend and LLM AI Agent (qwen/qwen3.6-35b-a3b). It listens to Mezon chat channels, detects document/image URLs or file attachments, extracts text via OCR, automatically classifies and formats documents, and supports interactive follow-up Q&A directly in chat threads.",
+  "source": "@site/../docs/integrations/mezon-bot.md",
+  "sourceDirName": "integrations",
+  "slug": "/integrations/mezon-bot",
+  "permalink": "/integrations/mezon-bot",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": null,
+  "sidebarPosition": 5,
+  "frontMatter": {
+    "title": "OmniScan Mezon Bot",
+    "sidebar_position": 5
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "OCR API Reference",
+    "permalink": "/api/API_REFERENCE"
+  }
+}

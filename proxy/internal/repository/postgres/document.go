@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -45,24 +46,89 @@ func (r *DocumentRepository) CreateManyWithQuota(ctx context.Context, userID int
 		return nil, fmt.Errorf("begin quota/document transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(ctx, `UPDATE account_configs SET doc_used = doc_used + $2, updated_at = now()
-		WHERE user_id = $1 AND (doc_quota = 0 OR doc_used + $2 <= doc_quota)`, userID, len(docs))
-	if err != nil {
-		return nil, fmt.Errorf("reserve document quota: %w", err)
+	var docQuota, docUsed, storageQuota, storageUsed, storageReserved int64
+	err = tx.QueryRow(ctx, `SELECT doc_quota, doc_used, storage_quota_bytes, storage_used_bytes, storage_reserved_bytes
+		FROM account_configs WHERE user_id=$1 FOR UPDATE`, userID).
+		Scan(&docQuota, &docUsed, &storageQuota, &storageUsed, &storageReserved)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
 	}
-	if tag.RowsAffected() == 0 {
+	if err != nil {
+		return nil, fmt.Errorf("lock account quota: %w", err)
+	}
+	if docQuota > 0 && docUsed+int64(len(docs)) > docQuota {
 		return nil, domain.ErrQuotaExceeded
+	}
+
+	type reservedInput struct {
+		key, documentID string
+		size            int64
+	}
+	reservedInputs := make([]reservedInput, 0, len(docs))
+	seenInputKeys := make(map[string]struct{}, len(docs))
+	var inputBytes, consumedReservedBytes int64
+	uploadPrefix := fmt.Sprintf("uploads/%d/", userID)
+	for i := range docs {
+		if docs[i].UserID != userID || docs[i].InputSizeBytes <= 0 {
+			return nil, domain.ErrBadParamInput
+		}
+		if _, duplicate := seenInputKeys[docs[i].InputKey]; duplicate {
+			return nil, fmt.Errorf("%w: the same input object cannot be submitted twice in one transaction", domain.ErrInvalidURL)
+		}
+		seenInputKeys[docs[i].InputKey] = struct{}{}
+		inputBytes += docs[i].InputSizeBytes
+		var reservedSize int64
+		var state string
+		var expiresAt time.Time
+		reservationErr := tx.QueryRow(ctx, `SELECT size_bytes, state, expires_at FROM upload_reservations
+			WHERE object_key=$1 AND user_id=$2 FOR UPDATE`, docs[i].InputKey, userID).
+			Scan(&reservedSize, &state, &expiresAt)
+		switch {
+		case reservationErr == nil:
+			if state != "reserved" || !time.Now().Before(expiresAt) || reservedSize != docs[i].InputSizeBytes {
+				return nil, fmt.Errorf("%w: upload reservation is expired, consumed, or size-mismatched", domain.ErrInvalidURL)
+			}
+			consumedReservedBytes += reservedSize
+			reservedInputs = append(reservedInputs, reservedInput{key: docs[i].InputKey, documentID: docs[i].ID, size: reservedSize})
+		case errors.Is(reservationErr, pgx.ErrNoRows):
+			if strings.HasPrefix(docs[i].InputKey, uploadPrefix) {
+				return nil, fmt.Errorf("%w: app-owned upload has no active byte reservation", domain.ErrInvalidURL)
+			}
+		default:
+			return nil, fmt.Errorf("lock upload reservation: %w", reservationErr)
+		}
+	}
+	newReserved := storageReserved - consumedReservedBytes
+	if newReserved < 0 {
+		return nil, fmt.Errorf("%w: reserved byte counter is inconsistent", domain.ErrConflict)
+	}
+	if storageQuota > 0 && storageUsed+inputBytes+newReserved > storageQuota {
+		return nil, domain.ErrStorageQuotaExceeded
+	}
+	_, err = tx.Exec(ctx, `UPDATE account_configs SET
+		doc_used=doc_used+$2, storage_used_bytes=storage_used_bytes+$3,
+		storage_reserved_bytes=$4, updated_at=now() WHERE user_id=$1`,
+		userID, len(docs), inputBytes, newReserved)
+	if err != nil {
+		return nil, fmt.Errorf("reserve document and storage quota: %w", err)
 	}
 	created := make([]domain.Document, 0, len(docs))
 	for i := range docs {
-		if docs[i].UserID != userID {
-			return nil, domain.ErrBadParamInput
-		}
 		doc, err := createDocument(ctx, tx, r.cipher, &docs[i])
 		if err != nil {
 			return nil, fmt.Errorf("insert document %d: %w", i, err)
 		}
 		created = append(created, *doc)
+	}
+	for _, reserved := range reservedInputs {
+		tag, err := tx.Exec(ctx, `UPDATE upload_reservations SET state='consumed', document_id=$2, updated_at=now()
+			WHERE object_key=$1 AND state='reserved'`, reserved.key, reserved.documentID)
+		if err != nil || tag.RowsAffected() != 1 {
+			if err == nil {
+				err = domain.ErrConflict
+			}
+			return nil, fmt.Errorf("consume upload reservation: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit quota/document transaction: %w", err)
@@ -375,6 +441,39 @@ func (r *DocumentRepository) ClaimNext(ctx context.Context, attemptID string, le
 	return r.GetByID(ctx, id)
 }
 
+// ClaimNextWithinCapacity claims the oldest runnable document whose media-type
+// weight fits the native worker's current available units. Keeping this filter
+// in the row-locking query prevents a large PDF at the head of the queue from
+// starving image work while the Mac is under temporary resource pressure.
+func (r *DocumentRepository) ClaimNextWithinCapacity(ctx context.Context, attemptID string, lease time.Duration, maxAttempts, availableUnits, imageJobUnits, pdfJobUnits int) (*domain.Document, error) {
+	if attemptID == "" || lease <= 0 || maxAttempts <= 0 || availableUnits <= 0 || imageJobUnits <= 0 || pdfJobUnits <= 0 {
+		return nil, domain.ErrBadParamInput
+	}
+	var id string
+	err := r.pool.QueryRow(ctx,
+		`UPDATE documents
+		 SET status = 'processing', attempt_id=$1, attempt_count=attempt_count+1,
+		     processing_until=$2, error_detail=NULL, updated_at=now()
+		 WHERE id = (
+		     SELECT id FROM documents
+		     WHERE (status = 'queued'
+		        OR (status='processing' AND processing_until <= now() AND attempt_count < $3::int))
+		       AND CASE WHEN input_content_type='application/pdf' THEN $6::int ELSE $5::int END <= $4::int
+		     ORDER BY CASE WHEN status='queued' THEN 0 ELSE 1 END, created_at ASC
+		     FOR UPDATE SKIP LOCKED
+		     LIMIT 1
+		 )
+		 RETURNING id`, attemptID, time.Now().Add(lease), maxAttempts, availableUnits, imageJobUnits, pdfJobUnits,
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim next capacity-eligible document: %w", err)
+	}
+	return r.GetByID(ctx, id)
+}
+
 func (r *DocumentRepository) RequeueAttempt(ctx context.Context, id, attemptID string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE documents SET status='queued', attempt_id=NULL, processing_until=NULL, updated_at=now()
 		WHERE id=$1 AND status='processing' AND attempt_id=$2`, id, attemptID)
@@ -552,12 +651,36 @@ func (r *DocumentRepository) ListExpiredInputs(ctx context.Context, before time.
 }
 
 func (r *DocumentRepository) MarkInputExpired(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE documents SET input_key=NULL
-		WHERE id=$1 AND status IN ('completed','failed','cancelled')`, id)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin input expiry: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var userID, size int64
+	var key string
+	err = tx.QueryRow(ctx, `SELECT user_id, COALESCE(input_key,''), input_size_bytes FROM documents
+		WHERE id=$1 AND input_key IS NOT NULL AND status IN ('completed','failed','cancelled') FOR UPDATE`, id).
+		Scan(&userID, &key, &size)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock expired input: %w", err)
+	}
+	_, err = tx.Exec(ctx, `UPDATE documents SET input_key=NULL WHERE id=$1`, id)
 	if err != nil {
 		return fmt.Errorf("mark input expired: %w", err)
 	}
-	return nil
+	_, err = tx.Exec(ctx, `UPDATE account_configs SET storage_used_bytes=GREATEST(0, storage_used_bytes-$2), updated_at=now()
+		WHERE user_id=$1`, userID, size)
+	if err != nil {
+		return fmt.Errorf("release expired input bytes: %w", err)
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM upload_reservations WHERE object_key=$1 AND state='consumed'`, key)
+	if err != nil {
+		return fmt.Errorf("delete consumed upload reservation: %w", err)
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *DocumentRepository) ListExpiredDocuments(ctx context.Context, before time.Time, limit int) ([]domain.Document, error) {
@@ -583,12 +706,38 @@ func (r *DocumentRepository) ListExpiredDocuments(ctx context.Context, before ti
 }
 
 func (r *DocumentRepository) DeleteExpiredDocument(ctx context.Context, id string, before time.Time) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM documents
-		WHERE id=$1 AND status IN ('completed','failed','cancelled') AND updated_at <= $2`, id, before)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin expired document deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var userID, size int64
+	var key *string
+	err = tx.QueryRow(ctx, `SELECT user_id, input_key, input_size_bytes FROM documents
+		WHERE id=$1 AND status IN ('completed','failed','cancelled') AND updated_at <= $2 FOR UPDATE`, id, before).
+		Scan(&userID, &key, &size)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock expired document: %w", err)
+	}
+	if key != nil {
+		_, err = tx.Exec(ctx, `UPDATE account_configs SET storage_used_bytes=GREATEST(0, storage_used_bytes-$2), updated_at=now()
+			WHERE user_id=$1`, userID, size)
+		if err != nil {
+			return fmt.Errorf("release deleted document input bytes: %w", err)
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM upload_reservations WHERE object_key=$1 AND state='consumed'`, *key)
+		if err != nil {
+			return fmt.Errorf("delete document upload reservation: %w", err)
+		}
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM documents WHERE id=$1`, id)
 	if err != nil {
 		return fmt.Errorf("delete expired document: %w", err)
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (r *DocumentRepository) IsInputKeyReferenced(ctx context.Context, key string) (bool, error) {

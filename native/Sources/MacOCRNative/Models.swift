@@ -123,6 +123,12 @@ public struct NativeCapacity: Codable {
     public var effectiveLimit: Int
     public var active: Int
     public var available: Int
+    public var activeUnits: Int
+    public var availableUnits: Int
+    public var imageJobUnits: Int
+    public var pdfJobUnits: Int
+    public var adaptive: Bool
+    public var resourceReason: String
 
     public init(
         configVersion: UInt64,
@@ -130,7 +136,13 @@ public struct NativeCapacity: Codable {
         operatorLimit: Int,
         effectiveLimit: Int,
         active: Int,
-        available: Int
+        available: Int,
+        activeUnits: Int = 0,
+        availableUnits: Int = 0,
+        imageJobUnits: Int = 1,
+        pdfJobUnits: Int = 1,
+        adaptive: Bool = false,
+        resourceReason: String = "operator-ceiling"
     ) {
         self.configVersion = configVersion
         self.state = state
@@ -138,6 +150,12 @@ public struct NativeCapacity: Codable {
         self.effectiveLimit = effectiveLimit
         self.active = active
         self.available = available
+        self.activeUnits = activeUnits
+        self.availableUnits = availableUnits
+        self.imageJobUnits = imageJobUnits
+        self.pdfJobUnits = pdfJobUnits
+        self.adaptive = adaptive
+        self.resourceReason = resourceReason
     }
 }
 

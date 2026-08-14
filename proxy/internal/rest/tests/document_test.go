@@ -38,10 +38,10 @@ func setupDocTestRouter(docSvc *document.Service, authSvc *auth.Service) *gin.En
 	return r
 }
 
-func setupUploadTestRouter(docSvc *document.Service, authSvc *auth.Service, objRepo *mockObjectRepoFull, maxUploadBytes int64) *gin.Engine {
+func setupUploadTestRouter(docSvc *document.Service, authSvc *auth.Service, objRepo *mockObjectRepoFull, reservations domain.UploadReservationRepository, maxUploadBytes int64) *gin.Engine {
 	r := setupDocTestRouter(docSvc, authSvc)
 	authHandler := rest.NewAuthHandler(authSvc)
-	uploadHandler := rest.NewUploadHandler(objRepo, maxUploadBytes)
+	uploadHandler := rest.NewUploadHandler(objRepo, maxUploadBytes, reservations)
 	r.POST("/v1/uploads/presign", authHandler.RequireAPIKey(), uploadHandler.Presign)
 	return r
 }
@@ -221,7 +221,7 @@ func TestPresignedUploadFlowAndLimits(t *testing.T) {
 
 	userRepo.users[1] = &domain.User{ID: 1, Email: "upload@user.com"}
 	userRepo.users[2] = &domain.User{ID: 2, Email: "other@user.com"}
-	cfgRepo.configs[1] = &domain.AccountConfig{UserID: 1, RateLimitRPM: 100, DocQuota: 1, DocUsed: 0}
+	cfgRepo.configs[1] = &domain.AccountConfig{UserID: 1, RateLimitRPM: 100, DocQuota: 1, DocUsed: 0, StorageQuotaBytes: 1094}
 	cfgRepo.configs[2] = &domain.AccountConfig{UserID: 2, RateLimitRPM: 100, DocQuota: 10, DocUsed: 0}
 	docRepo.configs = cfgRepo
 
@@ -236,11 +236,22 @@ func TestPresignedUploadFlowAndLimits(t *testing.T) {
 		t.Fatalf("GenerateKey other failed: %v", err)
 	}
 
-	router := setupUploadTestRouter(docSvc, authSvc, objRepo, 1024)
+	router := setupUploadTestRouter(docSvc, authSvc, objRepo, cfgRepo, 1024)
 
+	objRepo.presignErr = domain.ErrStorageUnavailable
 	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/uploads/presign", strings.NewReader(`{"filename":"storage-down.png","sizeBytes":10}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+genKey.Key)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable || cfgRepo.configs[1].StorageReservedBytes != 0 {
+		t.Fatalf("failed presign must refund reserved bytes, got status=%d cfg=%+v", w.Code, cfgRepo.configs[1])
+	}
+	objRepo.presignErr = nil
+
+	w = httptest.NewRecorder()
 	oversizedBody := `{"filename":"` + strings.Repeat("x", 9<<10) + `","sizeBytes":1}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/uploads/presign", strings.NewReader(oversizedBody))
+	req = httptest.NewRequest(http.MethodPost, "/v1/uploads/presign", strings.NewReader(oversizedBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+genKey.Key)
 	router.ServeHTTP(w, req)
@@ -290,6 +301,21 @@ func TestPresignedUploadFlowAndLimits(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &presign); err != nil || presign.SourceURL == "" || presign.UploadURL == "" {
 		t.Fatalf("invalid presign response: %+v err=%v", presign, err)
 	}
+	if cfgRepo.configs[1].StorageReservedBytes != 1094 {
+		t.Fatalf("presign bytes were not reserved: %+v", cfgRepo.configs[1])
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/uploads/presign", strings.NewReader(`{"filename":"over-quota.png","sizeBytes":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+genKey.Key)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), `"code":"STORAGE_QUOTA_EXCEEDED"`) {
+		t.Fatalf("expected aggregate storage quota rejection, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"rel":"self"`) || !strings.Contains(w.Body.String(), `"rel":"capabilities"`) {
+		t.Fatalf("storage quota response must provide HATEOAS recovery links: %s", w.Body.String())
+	}
 
 	sourceKey := strings.TrimPrefix(presign.SourceURL, "s3://macocr-inputs/")
 	objRepo.stored[sourceKey] = validPNGBytes
@@ -304,6 +330,9 @@ func TestPresignedUploadFlowAndLimits(t *testing.T) {
 	}
 	if cfgRepo.configs[1].DocUsed != 1 {
 		t.Fatalf("accepted document should consume one quota unit, got %d", cfgRepo.configs[1].DocUsed)
+	}
+	if cfgRepo.configs[1].StorageUsedBytes != 70 || cfgRepo.configs[1].StorageReservedBytes != 1024 {
+		t.Fatalf("reservation was not atomically converted to usage: %+v", cfgRepo.configs[1])
 	}
 
 	w = httptest.NewRecorder()

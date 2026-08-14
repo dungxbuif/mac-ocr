@@ -11,13 +11,13 @@ This guide takes you from an API key to a completed OCR result. You do not need 
 
 Ask your OCR Platform administrator for:
 
-- The API base URL, for example `https://ocr.example.com`.
+- The API base URL, for example `https://ocr.dungxbuif.com`.
 - An API key beginning with `sk_ocr_`. The key is shown only once when it is created.
 
 Store both values outside source control:
 
 ```bash
-export OCR_API_URL=https://ocr.example.com
+export OCR_API_URL=https://ocr.dungxbuif.com
 export OCR_API_KEY=sk_ocr_replace_with_your_key
 ```
 
@@ -71,7 +71,7 @@ The API returns `202 Accepted` and a generated `documentId`:
   "status": "queued",
   "createdAt": "2026-08-15T08:30:00Z",
   "links": [
-    {"rel": "self", "href": "https://ocr.example.com/v1/documents/doc_18f673199c0"}
+    {"rel": "self", "href": "https://ocr.dungxbuif.com/v1/documents/doc_18f673199c0"}
   ]
 }
 ```

@@ -86,7 +86,6 @@ func TestRoundTrip(t *testing.T) {
 	if u == "" {
 		t.Fatal("presigned url empty")
 	}
-	t.Logf("presigned url: %s", u)
 
 	putKey := "test/presigned-put-" + time.Now().Format("150405")
 	putPayload := []byte("hello presigned upload")

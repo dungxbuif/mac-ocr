@@ -23,13 +23,13 @@ const (
 )
 
 type AuthService interface {
-	CreateUser(ctx context.Context, email string, role domain.Role, password string, rateLimit *int, docQuota *int64) (*domain.User, error)
+	CreateUser(ctx context.Context, email string, role domain.Role, password string, rateLimit *int, docQuota *int64, storageQuotaBytes ...*int64) (*domain.User, error)
 	GetUser(ctx context.Context, id int64) (*domain.User, error)
 	ListUsers(ctx context.Context, limit, offset int) ([]domain.User, error)
 	UpdateUser(ctx context.Context, id int64, email *string, role *domain.Role, disabled *bool) (*domain.User, error)
 
 	GetAccountConfig(ctx context.Context, userID int64) (*domain.AccountConfig, error)
-	UpdateAccountConfig(ctx context.Context, userID int64, rateLimitRPM *int, docQuota *int64, adminID *int64) (*domain.AccountConfig, error)
+	UpdateAccountConfig(ctx context.Context, userID int64, rateLimitRPM *int, docQuota *int64, adminID *int64, storageQuotaBytes ...*int64) (*domain.AccountConfig, error)
 	ResetDocQuota(ctx context.Context, userID int64) error
 
 	GenerateKey(ctx context.Context, userID int64, name string, rateLimitRPM int) (*auth.GeneratedKey, error)
@@ -48,10 +48,11 @@ func NewAuthHandler(svc AuthService) *AuthHandler {
 }
 
 type createUserReq struct {
-	Email        string      `json:"email" binding:"required,email"`
-	Role         domain.Role `json:"role,omitempty" binding:"omitempty,oneof=admin user"`
-	RateLimitRPM *int        `json:"rate_limit_rpm,omitempty" binding:"omitempty,gte=0"`
-	DocQuota     *int64      `json:"doc_quota,omitempty" binding:"omitempty,gte=0"`
+	Email             string      `json:"email" binding:"required,email"`
+	Role              domain.Role `json:"role,omitempty" binding:"omitempty,oneof=admin user"`
+	RateLimitRPM      *int        `json:"rate_limit_rpm,omitempty" binding:"omitempty,gte=0"`
+	DocQuota          *int64      `json:"doc_quota,omitempty" binding:"omitempty,gte=0"`
+	StorageQuotaBytes *int64      `json:"storage_quota_bytes,omitempty" binding:"omitempty,gte=0"`
 }
 
 func (h *AuthHandler) CreateUser(c *gin.Context) {
@@ -61,7 +62,7 @@ func (h *AuthHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	u, err := h.svc.CreateUser(c.Request.Context(), req.Email, req.Role, "", req.RateLimitRPM, req.DocQuota)
+	u, err := h.svc.CreateUser(c.Request.Context(), req.Email, req.Role, "", req.RateLimitRPM, req.DocQuota, req.StorageQuotaBytes)
 	if err != nil {
 		RespondError(c, err)
 		return
@@ -165,8 +166,9 @@ func (h *AuthHandler) GetAccountConfig(c *gin.Context) {
 }
 
 type updateConfigReq struct {
-	RateLimitRPM *int   `json:"rate_limit_rpm,omitempty" binding:"omitempty,gte=0"`
-	DocQuota     *int64 `json:"doc_quota,omitempty" binding:"omitempty,gte=0"`
+	RateLimitRPM      *int   `json:"rate_limit_rpm,omitempty" binding:"omitempty,gte=0"`
+	DocQuota          *int64 `json:"doc_quota,omitempty" binding:"omitempty,gte=0"`
+	StorageQuotaBytes *int64 `json:"storage_quota_bytes,omitempty" binding:"omitempty,gte=0"`
 }
 
 func (h *AuthHandler) UpdateAccountConfig(c *gin.Context) {
@@ -179,11 +181,11 @@ func (h *AuthHandler) UpdateAccountConfig(c *gin.Context) {
 		RespondProblem(c, errs.InvalidInput(err.Error()))
 		return
 	}
-	if req.RateLimitRPM == nil && req.DocQuota == nil {
-		RespondProblem(c, errs.InvalidInput("at least one of rate_limit_rpm or doc_quota is required"))
+	if req.RateLimitRPM == nil && req.DocQuota == nil && req.StorageQuotaBytes == nil {
+		RespondProblem(c, errs.InvalidInput("at least one of rate_limit_rpm, doc_quota, or storage_quota_bytes is required"))
 		return
 	}
-	cfg, err := h.svc.UpdateAccountConfig(c.Request.Context(), userID, req.RateLimitRPM, req.DocQuota, nil)
+	cfg, err := h.svc.UpdateAccountConfig(c.Request.Context(), userID, req.RateLimitRPM, req.DocQuota, nil, req.StorageQuotaBytes)
 	if err != nil {
 		RespondError(c, err)
 		return

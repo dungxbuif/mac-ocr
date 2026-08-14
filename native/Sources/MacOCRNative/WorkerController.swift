@@ -63,7 +63,7 @@ public final class WorkerController: ObservableObject {
             ?? environment["APP_ENV"]
             ?? buildDefault("MacOCRDefaultMode", fallback: "development")
         let defaultPort = Int(buildDefault("MacOCRDefaultPort", fallback: environment["NATIVE_PORT"] ?? "8787")) ?? 8787
-        let defaultLimit = Int(buildDefault("MacOCRDefaultLimit", fallback: environment["NATIVE_LIMIT"] ?? "2")) ?? 2
+        let defaultLimit = Int(buildDefault("MacOCRDefaultLimit", fallback: environment["NATIVE_LIMIT"] ?? "6")) ?? 6
         let requestedNode = buildDefault("MacOCRDefaultNodeID", fallback: environment["NATIVE_NODE_ID"] ?? "ocr-native-01")
         let defaultNode = requestedNode.utf8.count <= 128 && !requestedNode.isEmpty && requestedNode.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" })
             ? requestedNode
@@ -293,7 +293,7 @@ public final class WorkerController: ObservableObject {
             throw configurationError("Proxy URL must be an HTTP(S) origin without credentials")
         }
         guard (1...65_535).contains(port) else { throw configurationError("Local port must be between 1 and 65535") }
-        guard (0...256).contains(operatorLimit) else { throw configurationError("Concurrency must be between 0 and 256") }
+        guard (0...256).contains(operatorLimit) else { throw configurationError("Concurrency ceiling must be between 0 and 256") }
         guard mode == "debug" || mode == "development" || mode == "production" else { throw configurationError("Mode must be debug, development, or production") }
         guard !authSecret.isEmpty else { throw configurationError("Native shared key is required") }
         if mode == "production" && (authSecret == "change-me-in-production" || authSecret.utf8.count < 32) {

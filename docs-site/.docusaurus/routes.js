@@ -4,15 +4,15 @@ import ComponentCreator from '@docusaurus/ComponentCreator';
 export default [
   {
     path: '/',
-    component: ComponentCreator('/', '0ff'),
+    component: ComponentCreator('/', '244'),
     routes: [
       {
         path: '/',
-        component: ComponentCreator('/', '728'),
+        component: ComponentCreator('/', 'f5f'),
         routes: [
           {
             path: '/',
-            component: ComponentCreator('/', '30f'),
+            component: ComponentCreator('/', 'ee4'),
             routes: [
               {
                 path: '/api/API_REFERENCE',
@@ -40,6 +40,12 @@ export default [
               {
                 path: '/guides/onboarding',
                 component: ComponentCreator('/guides/onboarding', '598'),
+                exact: true,
+                sidebar: "docsSidebar"
+              },
+              {
+                path: '/integrations/mezon-bot',
+                component: ComponentCreator('/integrations/mezon-bot', '240'),
                 exact: true,
                 sidebar: "docsSidebar"
               },

@@ -29,9 +29,20 @@ CREATE TABLE IF NOT EXISTS account_configs (
     rate_limit_rpm INT NOT NULL DEFAULT 60,
     doc_quota      BIGINT NOT NULL DEFAULT 0,
     doc_used       BIGINT NOT NULL DEFAULT 0,
+    storage_quota_bytes BIGINT NOT NULL DEFAULT 0,
+    storage_used_bytes BIGINT NOT NULL DEFAULT 0,
+    storage_reserved_bytes BIGINT NOT NULL DEFAULT 0,
     quota_reset_at TIMESTAMPTZ,
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_by     BIGINT REFERENCES users(id)
+);
+
+ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS storage_quota_bytes BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS storage_used_bytes BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS storage_reserved_bytes BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE account_configs DROP CONSTRAINT IF EXISTS account_configs_storage_nonnegative;
+ALTER TABLE account_configs ADD CONSTRAINT account_configs_storage_nonnegative CHECK (
+    storage_quota_bytes >= 0 AND storage_used_bytes >= 0 AND storage_reserved_bytes >= 0
 );
 
 INSERT INTO account_configs (user_id, rate_limit_rpm, doc_quota, doc_used)
@@ -94,6 +105,36 @@ CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id, created_at D
 CREATE INDEX IF NOT EXISTS idx_documents_result_expiry ON documents(result_expires_at) WHERE result_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_documents_processing_lease ON documents(processing_until) WHERE status = 'processing';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_terminal_event ON documents(terminal_event_id) WHERE terminal_event_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS upload_reservations (
+    object_key  TEXT PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    size_bytes  BIGINT NOT NULL CHECK (size_bytes > 0),
+    state       TEXT NOT NULL DEFAULT 'reserved' CHECK (state IN ('reserved','consumed')),
+    document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_upload_reservations_expiry
+ON upload_reservations(expires_at)
+WHERE state = 'reserved';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_upload_reservations_document
+ON upload_reservations(document_id)
+WHERE document_id IS NOT NULL;
+
+-- Reconcile aggregate counters on every startup so legacy retained inputs are
+-- charged and an interrupted cleanup cannot leave counters drifting.
+UPDATE account_configs AS cfg SET
+    storage_used_bytes = COALESCE((
+        SELECT SUM(d.input_size_bytes) FROM documents d
+        WHERE d.user_id = cfg.user_id AND d.input_key IS NOT NULL
+    ), 0),
+    storage_reserved_bytes = COALESCE((
+        SELECT SUM(r.size_bytes) FROM upload_reservations r
+        WHERE r.user_id = cfg.user_id AND r.state = 'reserved'
+    ), 0);
 
 CREATE TABLE IF NOT EXISTS notification_events (
     id                    TEXT PRIMARY KEY,

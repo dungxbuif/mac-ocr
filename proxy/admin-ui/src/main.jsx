@@ -230,23 +230,25 @@ function Users({ api, notify }) {
 
   return (
     <>
-      <PageHeader eyebrow="Access" title="Users" description="Accounts, request rates, document quotas, and API credentials." action={<button onClick={() => setCreateOpen(true)}>New user</button>} />
+      <PageHeader eyebrow="Access" title="Users" description="Accounts, request rates, document and aggregate storage quotas, and API credentials." action={<button onClick={() => setCreateOpen(true)}>New user</button>} />
       {error && <Notice>{error}</Notice>}
       <section className="panel table-panel">
         <div className="table-meta"><span>{users.length} accounts</span><button className="text-button" onClick={load}>Refresh</button></div>
         <div className="table-scroll">
           <table>
-            <thead><tr><th>User</th><th>Status</th><th>Rate</th><th>Quota</th><th>Used</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <thead><tr><th>User</th><th>Status</th><th>Rate</th><th>Documents</th><th>Storage quota</th><th>Stored</th><th>Reserved</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
-              {loading && <EmptyRow columns={6}>Loading accounts…</EmptyRow>}
-              {!loading && users.length === 0 && <EmptyRow columns={6}>No users yet.</EmptyRow>}
+              {loading && <EmptyRow columns={8}>Loading accounts…</EmptyRow>}
+              {!loading && users.length === 0 && <EmptyRow columns={8}>No users yet.</EmptyRow>}
               {!loading && users.map((user) => (
                 <tr key={user.id}>
                   <td><div className="primary-cell"><strong>{user.email}</strong><small>#{user.id} · {user.role}</small></div></td>
                   <td><Badge status={user.disabled ? "disabled" : "active"} /></td>
                   <td>{user.config?.rate_limit_rpm ?? 60} rpm</td>
-                  <td>{user.config?.doc_quota ? user.config.doc_quota.toLocaleString() : "Unlimited"}</td>
-                  <td>{(user.config?.doc_used || 0).toLocaleString()}</td>
+                  <td>{(user.config?.doc_used || 0).toLocaleString()} / {user.config?.doc_quota ? user.config.doc_quota.toLocaleString() : "∞"}</td>
+                  <td>{user.config?.storage_quota_bytes ? formatBytes(user.config.storage_quota_bytes) : "Unlimited"}</td>
+                  <td>{formatBytes(user.config?.storage_used_bytes || 0)}</td>
+                  <td>{formatBytes(user.config?.storage_reserved_bytes || 0)}</td>
                   <td><div className="row-actions"><button className="small secondary" onClick={() => createKey(user)}>Create key</button><button className="small ghost" onClick={() => resetQuota(user)}>Reset</button>{!user.disabled && <button className="small ghost danger" onClick={() => deactivate(user)}>Deactivate</button>}</div></td>
                 </tr>
               ))}
@@ -333,17 +335,18 @@ function CreateUserModal({ onClose, onSubmit }) {
   const [email, setEmail] = useState("");
   const [rate, setRate] = useState(60);
   const [quota, setQuota] = useState(1000);
+  const [storageGB, setStorageGB] = useState(10);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(event) {
     event.preventDefault(); setBusy(true); setError("");
-    try { await onSubmit({ email, rate_limit_rpm: Number(rate), doc_quota: Number(quota) }); } catch (err) { setError(err.message); setBusy(false); }
+    try { await onSubmit({ email, rate_limit_rpm: Number(rate), doc_quota: Number(quota), storage_quota_bytes: Number(storageGB) * 1024 * 1024 * 1024 }); } catch (err) { setError(err.message); setBusy(false); }
   }
   return <Modal title="Create user" description="Set account-level limits now; API keys can be created after." onClose={onClose}>
     <form onSubmit={submit} className="modal-form">
       <label>Email<input autoFocus type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="user@example.com" required /></label>
-      <div className="field-grid"><label>Requests / minute<input type="number" min="0" value={rate} onChange={(event) => setRate(event.target.value)} required /></label><label>Document quota<input type="number" min="0" value={quota} onChange={(event) => setQuota(event.target.value)} required /></label></div>
-      <small className="field-note">A quota of 0 means unlimited documents.</small>
+      <div className="field-grid"><label>Requests / minute<input type="number" min="0" value={rate} onChange={(event) => setRate(event.target.value)} required /></label><label>Document quota<input type="number" min="0" value={quota} onChange={(event) => setQuota(event.target.value)} required /></label><label>Storage quota (GiB)<input type="number" min="0" value={storageGB} onChange={(event) => setStorageGB(event.target.value)} required /></label></div>
+      <small className="field-note">A quota of 0 means unlimited. Storage includes retained inputs and unconsumed presigned reservations.</small>
       {error && <p className="form-error">{error}</p>}
       <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Creating…" : "Create user"}</button></div>
     </form>

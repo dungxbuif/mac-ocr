@@ -24,6 +24,10 @@ type Scheduler struct {
 	wakeCh      chan struct{}
 }
 
+type weightedCapacityClaimer interface {
+	ClaimNextWithinCapacity(ctx context.Context, attemptID string, lease time.Duration, maxAttempts, availableUnits, imageJobUnits, pdfJobUnits int) (*domain.Document, error)
+}
+
 func New(
 	docs domain.DocumentRepository,
 	objects domain.ObjectRepository,
@@ -78,8 +82,21 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 	s.failExhaustedAttempts(ctx)
+	capacity, err := s.native.GetCapacity(ctx)
+	if err != nil {
+		s.logger.Warn("native capacity unavailable; delaying queue claim", "error", err)
+		return
+	}
+	if capacity.EffectiveLimit <= 0 || capacity.Available <= 0 || capacity.State == "paused" || capacity.State == "busy" {
+		return
+	}
 	attemptID := fmt.Sprintf("att_%x", time.Now().UnixNano())
-	doc, err := s.docs.ClaimNext(ctx, attemptID, s.lease, s.maxAttempts)
+	var doc *domain.Document
+	if claimer, ok := s.docs.(weightedCapacityClaimer); ok && capacity.AvailableUnits > 0 && capacity.ImageJobUnits > 0 && capacity.PDFJobUnits > 0 {
+		doc, err = claimer.ClaimNextWithinCapacity(ctx, attemptID, s.lease, s.maxAttempts, capacity.AvailableUnits, capacity.ImageJobUnits, capacity.PDFJobUnits)
+	} else {
+		doc, err = s.docs.ClaimNext(ctx, attemptID, s.lease, s.maxAttempts)
+	}
 	if err != nil {
 		s.logger.Error("claim next document failed", "error", err)
 		return

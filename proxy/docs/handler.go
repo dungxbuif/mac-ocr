@@ -24,10 +24,11 @@ type dynamicFS struct {
 func Handler(apiBaseURL, docsBaseURL string) http.Handler {
 	dfs := &dynamicFS{
 		replacements: map[string]string{
-			"https://ocr.example.com":  strings.TrimRight(apiBaseURL, "/"),
-			"https://docs.example.com": strings.TrimRight(docsBaseURL, "/"),
-			"{{PUBLIC_API_URL}}":       strings.TrimRight(apiBaseURL, "/"),
-			"{{PUBLIC_DOCS_URL}}":      strings.TrimRight(docsBaseURL, "/"),
+			"https://ocr.dungxbuif.com": strings.TrimRight(apiBaseURL, "/"),
+			"https://ocr.example.com":   strings.TrimRight(apiBaseURL, "/"),
+			"https://docs.example.com":  strings.TrimRight(docsBaseURL, "/"),
+			"{{PUBLIC_API_URL}}":        strings.TrimRight(apiBaseURL, "/"),
+			"{{PUBLIC_DOCS_URL}}":       strings.TrimRight(docsBaseURL, "/"),
 		},
 	}
 	return dfs
@@ -40,7 +41,8 @@ func SwaggerHandler(apiBaseURL string) http.Handler {
 			http.Error(w, "swagger template not found", http.StatusInternalServerError)
 			return
 		}
-		replaced := bytes.ReplaceAll(data, []byte("https://ocr.example.com"), []byte(strings.TrimRight(apiBaseURL, "/")))
+		replaced := bytes.ReplaceAll(data, []byte("https://ocr.dungxbuif.com"), []byte(strings.TrimRight(apiBaseURL, "/")))
+		replaced = bytes.ReplaceAll(replaced, []byte("https://ocr.example.com"), []byte(strings.TrimRight(apiBaseURL, "/")))
 		replaced = bytes.ReplaceAll(replaced, []byte("{{PUBLIC_API_URL}}"), []byte(strings.TrimRight(apiBaseURL, "/")))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=300")

@@ -47,11 +47,68 @@ func (m *mockUserRepoFull) Update(ctx context.Context, u *domain.User) (*domain.
 }
 
 type mockConfigRepoFull struct {
-	configs map[int64]*domain.AccountConfig
+	configs      map[int64]*domain.AccountConfig
+	reservations map[string]domain.UploadReservation
 }
 
 func newMockConfigRepo() *mockConfigRepoFull {
-	return &mockConfigRepoFull{configs: make(map[int64]*domain.AccountConfig)}
+	return &mockConfigRepoFull{configs: make(map[int64]*domain.AccountConfig), reservations: make(map[string]domain.UploadReservation)}
+}
+func (m *mockConfigRepoFull) ReserveUpload(_ context.Context, reservation domain.UploadReservation) error {
+	cfg, ok := m.configs[reservation.UserID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	if cfg.StorageQuotaBytes > 0 && cfg.StorageUsedBytes+cfg.StorageReservedBytes+reservation.SizeBytes > cfg.StorageQuotaBytes {
+		return domain.ErrStorageQuotaExceeded
+	}
+	cfg.StorageReservedBytes += reservation.SizeBytes
+	m.reservations[reservation.ObjectKey] = reservation
+	return nil
+}
+func (m *mockConfigRepoFull) ReleaseUpload(_ context.Context, userID int64, objectKey string) (bool, error) {
+	reservation, ok := m.reservations[objectKey]
+	if !ok || reservation.UserID != userID {
+		return false, nil
+	}
+	if cfg := m.configs[userID]; cfg != nil {
+		cfg.StorageReservedBytes -= reservation.SizeBytes
+	}
+	delete(m.reservations, objectKey)
+	return true, nil
+}
+func (m *mockConfigRepoFull) ListExpiredUploads(_ context.Context, before time.Time, limit int) ([]domain.UploadReservation, error) {
+	var out []domain.UploadReservation
+	for _, item := range m.reservations {
+		if !item.ExpiresAt.After(before) && len(out) < limit {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+func (m *mockConfigRepoFull) consumeInputs(userID int64, docs []domain.Document) error {
+	cfg := m.configs[userID]
+	var bytesToUse, reservedToConsume int64
+	for _, doc := range docs {
+		bytesToUse += doc.InputSizeBytes
+		if reservation, ok := m.reservations[doc.InputKey]; ok {
+			if reservation.UserID != userID || reservation.SizeBytes != doc.InputSizeBytes {
+				return domain.ErrInvalidURL
+			}
+			reservedToConsume += reservation.SizeBytes
+		} else if strings.HasPrefix(doc.InputKey, fmt.Sprintf("uploads/%d/", userID)) {
+			return domain.ErrInvalidURL
+		}
+	}
+	if cfg.StorageQuotaBytes > 0 && cfg.StorageUsedBytes+cfg.StorageReservedBytes-reservedToConsume+bytesToUse > cfg.StorageQuotaBytes {
+		return domain.ErrStorageQuotaExceeded
+	}
+	cfg.StorageUsedBytes += bytesToUse
+	cfg.StorageReservedBytes -= reservedToConsume
+	for _, doc := range docs {
+		delete(m.reservations, doc.InputKey)
+	}
+	return nil
 }
 func (m *mockConfigRepoFull) GetByUserID(ctx context.Context, userID int64) (*domain.AccountConfig, error) {
 	cfg, ok := m.configs[userID]
@@ -145,7 +202,8 @@ func (m *mockKeyRepoFull) Revoke(ctx context.Context, id int64) error {
 }
 
 type mockObjectRepoFull struct {
-	stored map[string][]byte
+	stored     map[string][]byte
+	presignErr error
 }
 
 func newMockObjectRepoFull() *mockObjectRepoFull {
@@ -179,6 +237,9 @@ func (m *mockObjectRepoFull) PresignGetURL(ctx context.Context, key string, ttl 
 }
 
 func (m *mockObjectRepoFull) PresignPutURL(ctx context.Context, key, contentType string, contentLength int64, ttl time.Duration) (string, http.Header, error) {
+	if m.presignErr != nil {
+		return "", nil, m.presignErr
+	}
 	return "http://mock-s3/" + key + "?put=1", http.Header{"Content-Type": []string{contentType}}, nil
 }
 
@@ -241,6 +302,10 @@ func (m *mockDocRepoAdapter) CreateWithQuota(ctx context.Context, doc *domain.Do
 		if err := m.configs.ReserveDocs(ctx, doc.UserID, 1); err != nil {
 			return nil, err
 		}
+		if err := m.configs.consumeInputs(doc.UserID, []domain.Document{*doc}); err != nil {
+			_ = m.configs.RefundDocs(ctx, doc.UserID, 1)
+			return nil, err
+		}
 	}
 	created, err := m.Create(ctx, doc)
 	if err != nil && m.configs != nil {
@@ -251,6 +316,10 @@ func (m *mockDocRepoAdapter) CreateWithQuota(ctx context.Context, doc *domain.Do
 func (m *mockDocRepoAdapter) CreateManyWithQuota(ctx context.Context, userID int64, docs []domain.Document) ([]domain.Document, error) {
 	if m.configs != nil {
 		if err := m.configs.ReserveDocs(ctx, userID, int64(len(docs))); err != nil {
+			return nil, err
+		}
+		if err := m.configs.consumeInputs(userID, docs); err != nil {
+			_ = m.configs.RefundDocs(ctx, userID, int64(len(docs)))
 			return nil, err
 		}
 	}

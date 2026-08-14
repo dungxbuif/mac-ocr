@@ -42,8 +42,9 @@ const (
 	CodeBatchValidationFailed  Code = "BATCH_VALIDATION_FAILED"
 	CodeOptionValidationFailed Code = "OPTION_VALIDATION_FAILED"
 
-	CodeRateLimited   Code = "RATE_LIMITED"
-	CodeQuotaExceeded Code = "QUOTA_EXCEEDED"
+	CodeRateLimited          Code = "RATE_LIMITED"
+	CodeQuotaExceeded        Code = "QUOTA_EXCEEDED"
+	CodeStorageQuotaExceeded Code = "STORAGE_QUOTA_EXCEEDED"
 
 	CodeInternal       Code = "INTERNAL_ERROR"
 	CodeNotImplemented Code = "NOT_IMPLEMENTED"

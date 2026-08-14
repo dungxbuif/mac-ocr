@@ -31,7 +31,7 @@ func newFakeAuthService() *fakeAuthService {
 	}
 }
 
-func (f *fakeAuthService) CreateUser(_ context.Context, email string, role domain.Role, _ string, rpm *int, quota *int64) (*domain.User, error) {
+func (f *fakeAuthService) CreateUser(_ context.Context, email string, role domain.Role, _ string, rpm *int, quota *int64, storage ...*int64) (*domain.User, error) {
 	f.seq++
 	r := role
 	if r == "" {
@@ -57,6 +57,9 @@ func (f *fakeAuthService) CreateUser(_ context.Context, email string, role domai
 	}
 	if quota != nil {
 		c.DocQuota = *quota
+	}
+	if len(storage) > 0 && storage[0] != nil {
+		c.StorageQuotaBytes = *storage[0]
 	}
 	u.Config = c
 	f.users[f.seq] = u
@@ -108,7 +111,7 @@ func (f *fakeAuthService) GetAccountConfig(_ context.Context, userID int64) (*do
 	return c, nil
 }
 
-func (f *fakeAuthService) UpdateAccountConfig(_ context.Context, userID int64, rpm *int, quota *int64, _ *int64) (*domain.AccountConfig, error) {
+func (f *fakeAuthService) UpdateAccountConfig(_ context.Context, userID int64, rpm *int, quota *int64, _ *int64, storage ...*int64) (*domain.AccountConfig, error) {
 	c, ok := f.configs[userID]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -118,6 +121,9 @@ func (f *fakeAuthService) UpdateAccountConfig(_ context.Context, userID int64, r
 	}
 	if quota != nil {
 		c.DocQuota = *quota
+	}
+	if len(storage) > 0 && storage[0] != nil {
+		c.StorageQuotaBytes = *storage[0]
 	}
 	return c, nil
 }

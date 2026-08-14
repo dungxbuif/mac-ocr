@@ -21,7 +21,7 @@ High-performance, asynchronous OCR backend platform powered by the macOS Apple V
 
 ### 🛡️ Large File Presigned S3 Uploads
 
-- **Direct S3 Uploads:** `POST /v1/uploads/presign` issues authenticated `PUT uploadUrl` for large files (up to 100 MiB), eliminating Base64 decoding overhead.
+- **Direct S3 Uploads:** `POST /v1/uploads/presign` issues authenticated a`PUT uploadUrl` for large files (up to 100 MiB), eliminating Base64 decoding overhead.
 - **Multi-Layer Validation:** Enforces file-size limits at presign issuance, re-verified via `HEAD` metadata and bounded streaming before OCR execution.
 
 ### 🔐 Security, Authentication & Quotas

@@ -24,13 +24,30 @@ type User struct {
 }
 
 type AccountConfig struct {
-	UserID       int64      `json:"user_id"`
-	RateLimitRPM int        `json:"rate_limit_rpm"`
-	DocQuota     int64      `json:"doc_quota"`
-	DocUsed      int64      `json:"doc_used"`
-	QuotaResetAt *time.Time `json:"quota_reset_at,omitempty"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	UpdatedBy    *int64     `json:"updated_by,omitempty"`
+	UserID               int64      `json:"user_id"`
+	RateLimitRPM         int        `json:"rate_limit_rpm"`
+	DocQuota             int64      `json:"doc_quota"`
+	DocUsed              int64      `json:"doc_used"`
+	StorageQuotaBytes    int64      `json:"storage_quota_bytes"`
+	StorageUsedBytes     int64      `json:"storage_used_bytes"`
+	StorageReservedBytes int64      `json:"storage_reserved_bytes"`
+	QuotaResetAt         *time.Time `json:"quota_reset_at,omitempty"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+	UpdatedBy            *int64     `json:"updated_by,omitempty"`
+}
+
+type UploadReservation struct {
+	ObjectKey string    `json:"object_key"`
+	UserID    int64     `json:"user_id"`
+	SizeBytes int64     `json:"size_bytes"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type UploadReservationRepository interface {
+	ReserveUpload(ctx context.Context, reservation UploadReservation) error
+	ReleaseUpload(ctx context.Context, userID int64, objectKey string) (bool, error)
+	ListExpiredUploads(ctx context.Context, before time.Time, limit int) ([]UploadReservation, error)
 }
 
 type ApiKey struct {

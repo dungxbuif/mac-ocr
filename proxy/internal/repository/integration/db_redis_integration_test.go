@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -102,6 +103,123 @@ func TestPostgresAndRedisIntegration(t *testing.T) {
 	}
 	if err := configRepo.RefundDocs(ctx, user.ID, 1); err != nil {
 		t.Fatalf("refund docs: %v", err)
+	}
+
+	updatedCfg.StorageQuotaBytes = 100
+	updatedCfg, err = configRepo.Update(ctx, updatedCfg)
+	if err != nil {
+		t.Fatalf("set storage quota: %v", err)
+	}
+	var wg sync.WaitGroup
+	reservationErrors := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			reservationErrors <- configRepo.ReserveUpload(ctx, domain.UploadReservation{
+				ObjectKey: fmt.Sprintf("uploads/%d/race-%d", user.ID, index), UserID: user.ID, SizeBytes: 60, ExpiresAt: time.Now().Add(time.Hour),
+			})
+		}(i)
+	}
+	wg.Wait()
+	close(reservationErrors)
+	succeeded, quotaRejected := 0, 0
+	for reservationErr := range reservationErrors {
+		if reservationErr == nil {
+			succeeded++
+		} else if reservationErr == domain.ErrStorageQuotaExceeded {
+			quotaRejected++
+		} else {
+			t.Fatalf("unexpected concurrent reservation error: %v", reservationErr)
+		}
+	}
+	if succeeded != 1 || quotaRejected != 1 {
+		t.Fatalf("atomic byte reservation results success=%d rejected=%d", succeeded, quotaRejected)
+	}
+	for i := 0; i < 2; i++ {
+		_, _ = configRepo.ReleaseUpload(ctx, user.ID, fmt.Sprintf("uploads/%d/race-%d", user.ID, i))
+	}
+	expiredKey := fmt.Sprintf("uploads/%d/expired", user.ID)
+	if err := configRepo.ReserveUpload(ctx, domain.UploadReservation{ObjectKey: expiredKey, UserID: user.ID, SizeBytes: 20, ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatalf("reserve expired upload fixture: %v", err)
+	}
+	expiredReservations, err := configRepo.ListExpiredUploads(ctx, time.Now(), 100)
+	if err != nil {
+		t.Fatalf("list expired upload reservations: %v", err)
+	}
+	foundExpired := false
+	for _, reservation := range expiredReservations {
+		if reservation.ObjectKey == expiredKey {
+			foundExpired = true
+		}
+	}
+	if !foundExpired {
+		t.Fatal("expired upload reservation was not selected for cleanup")
+	}
+	if released, err := configRepo.ReleaseUpload(ctx, user.ID, expiredKey); err != nil || !released {
+		t.Fatalf("release expired upload reservation: %v", err)
+	}
+
+	reservedKey := fmt.Sprintf("uploads/%d/consume", user.ID)
+	if err := configRepo.ReserveUpload(ctx, domain.UploadReservation{ObjectKey: reservedKey, UserID: user.ID, SizeBytes: 60, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("reserve upload for consumption: %v", err)
+	}
+	storageDocID := fmt.Sprintf("doc_storage_%d", suffix)
+	createdStorageDoc, err := docRepo.CreateWithQuota(ctx, &domain.Document{
+		ID: storageDocID, UserID: user.ID, Status: domain.StatusQueued, InputKey: reservedKey,
+		InputSHA256: "abc", InputContentType: "application/pdf", InputSizeBytes: 60,
+	})
+	if err != nil {
+		t.Fatalf("consume upload reservation with document: %v", err)
+	}
+	if createdStorageDoc.ID != storageDocID {
+		t.Fatalf("unexpected storage document: %+v", createdStorageDoc)
+	}
+	storageCfg, err := configRepo.GetByUserID(ctx, user.ID)
+	if err != nil || storageCfg.StorageUsedBytes != 60 || storageCfg.StorageReservedBytes != 0 {
+		t.Fatalf("unexpected consumed byte counters cfg=%+v err=%v", storageCfg, err)
+	}
+	if _, err := pgRepo.Pool().Exec(ctx, `UPDATE documents SET status='completed' WHERE id=$1`, storageDocID); err != nil {
+		t.Fatalf("complete storage document: %v", err)
+	}
+	if err := docRepo.MarkInputExpired(ctx, storageDocID); err != nil {
+		t.Fatalf("expire storage document input: %v", err)
+	}
+	storageCfg, err = configRepo.GetByUserID(ctx, user.ID)
+	if err != nil || storageCfg.StorageUsedBytes != 0 || storageCfg.StorageReservedBytes != 0 {
+		t.Fatalf("input expiry did not release byte quota cfg=%+v err=%v", storageCfg, err)
+	}
+
+	capacityUser, err := userRepo.Create(ctx, &domain.User{
+		Email: fmt.Sprintf("capacity-%d@example.test", suffix), PasswordHash: "integration-hash", Role: domain.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("create weighted-capacity user: %v", err)
+	}
+	if _, err := pgRepo.Pool().Exec(ctx, `DELETE FROM documents WHERE id LIKE 'doc_capacity_%'`); err != nil {
+		t.Fatalf("cleanup stale weighted-capacity fixtures: %v", err)
+	}
+	pdfQueueID := fmt.Sprintf("doc_capacity_pdf_%d", suffix)
+	imageQueueID := fmt.Sprintf("doc_capacity_image_%d", suffix)
+	for _, fixture := range []struct {
+		id, contentType string
+		createdAt       time.Time
+	}{
+		{id: pdfQueueID, contentType: "application/pdf", createdAt: time.Now().Add(-time.Minute)},
+		{id: imageQueueID, contentType: "image/png", createdAt: time.Now()},
+	} {
+		if _, err := pgRepo.Pool().Exec(ctx, `INSERT INTO documents
+			(id, user_id, status, input_key, input_content_type, input_size_bytes, created_at)
+			VALUES ($1,$2,'queued',$3,$4,1,$5)`, fixture.id, capacityUser.ID, "inputs/"+fixture.id, fixture.contentType, fixture.createdAt); err != nil {
+			t.Fatalf("insert weighted-capacity fixture: %v", err)
+		}
+	}
+	claimed, err := docRepo.ClaimNextWithinCapacity(ctx, fmt.Sprintf("att_capacity_%d", suffix), time.Minute, 3, 1, 1, 3)
+	if err != nil || claimed == nil || claimed.ID != imageQueueID {
+		t.Fatalf("capacity-aware claim should skip older PDF and select image: doc=%+v err=%v", claimed, err)
+	}
+	if _, err := pgRepo.Pool().Exec(ctx, `DELETE FROM users WHERE id=$1`, capacityUser.ID); err != nil {
+		t.Fatalf("cleanup weighted-capacity user: %v", err)
 	}
 
 	keyHash := fmt.Sprintf("integration-key-hash-%d", suffix)

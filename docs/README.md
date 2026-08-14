@@ -20,6 +20,7 @@ Integrate image and PDF text recognition through REST or MCP. OCR Platform accep
 3. Read the [OCR response model](api/OCR_RESPONSE.md) before consuming text blocks, confidence values, or bounding boxes.
 4. Follow [MCP integration](api/MCP_INTEGRATION.md) when connecting an agent or MCP client.
 5. Check [Release Notes](RELEASE_NOTES.md) for current features and changelog.
+6. Read [OmniScan Mezon Bot Design & Architecture](pathname://../omniscan/docs/DESIGN_DECISIONS.md) for Mezon bot decisions.
 
 ## Core contract
 

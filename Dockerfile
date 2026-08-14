@@ -1,8 +1,8 @@
 # Multi-stage Dockerfile for MacOCR Platform (Proxy + Embedded Admin UI & Docs)
 
 # Define global build arguments
-ARG PUBLIC_API_BASE_URL=http://localhost:8080
-ARG PUBLIC_DOCS_BASE_URL=http://localhost:3000
+ARG PUBLIC_API_BASE_URL=https://ocr.dungxbuif.com
+ARG PUBLIC_DOCS_BASE_URL=https://ocr.dungxbuif.com
 ARG APP_ENV=production
 ARG VERSION=1.0.0
 ARG GIT_COMMIT=unknown

@@ -55,6 +55,12 @@ func RespondError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrQuotaExceeded):
 		c.Header("Retry-After", "60")
 		p = errs.New(errs.CodeQuotaExceeded, http.StatusTooManyRequests, "Document quota exceeded").WithDetail(err.Error())
+	case errors.Is(err, domain.ErrStorageQuotaExceeded):
+		c.Header("Retry-After", "60")
+		p = errs.New(errs.CodeStorageQuotaExceeded, http.StatusTooManyRequests, "Storage quota exceeded").
+			WithDetail(err.Error()).
+			WithLink("self", c.Request.URL.Path, c.Request.Method).
+			WithLink("capabilities", "/v1/ocr/capabilities", http.MethodGet)
 	case errors.Is(err, domain.ErrStorageUnavailable):
 		p = errs.ServiceUnavailable("storage backend unavailable", err)
 	default:

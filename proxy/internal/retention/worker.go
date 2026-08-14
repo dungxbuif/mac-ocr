@@ -31,6 +31,7 @@ type Worker struct {
 	notifications   domain.NotificationRepository
 	objects         objectDeleter
 	uploads         expiredUploadLister
+	reservations    domain.UploadReservationRepository
 	logger          *slog.Logger
 	inputTTL        time.Duration
 	uploadTTL       time.Duration
@@ -43,14 +44,19 @@ type cleanupStats struct {
 	inputsExpired        int
 	documentsDeleted     int
 	orphanUploadsDeleted int
+	reservationsReleased int
 	referencedUploads    int
 	notificationsDeleted int64
 }
 
-func New(docs documentRepository, notifications domain.NotificationRepository, objects objectDeleter, logger *slog.Logger, inputTTL, uploadTTL, documentTTL, notificationTTL time.Duration) *Worker {
+func New(docs documentRepository, notifications domain.NotificationRepository, objects objectDeleter, logger *slog.Logger, inputTTL, uploadTTL, documentTTL, notificationTTL time.Duration, reservations ...domain.UploadReservationRepository) *Worker {
 	deleter := objects
 	uploads, _ := objects.(expiredUploadLister)
-	return &Worker{docs: docs, notifications: notifications, objects: deleter, uploads: uploads, logger: logger, inputTTL: inputTTL, uploadTTL: uploadTTL, documentTTL: documentTTL, notificationTTL: notificationTTL}
+	var reservationRepo domain.UploadReservationRepository
+	if len(reservations) > 0 {
+		reservationRepo = reservations[0]
+	}
+	return &Worker{docs: docs, notifications: notifications, objects: deleter, uploads: uploads, reservations: reservationRepo, logger: logger, inputTTL: inputTTL, uploadTTL: uploadTTL, documentTTL: documentTTL, notificationTTL: notificationTTL}
 }
 
 func (w *Worker) Run(ctx context.Context) {
@@ -75,6 +81,7 @@ func (w *Worker) Run(ctx context.Context) {
 func (w *Worker) cleanup(ctx context.Context) {
 	startedAt := time.Now()
 	stats := cleanupStats{}
+	stats.reservationsReleased = w.cleanupExpiredReservations(ctx)
 	stats.resultsExpired = w.cleanupResults(ctx)
 	stats.inputsExpired = w.cleanupInputs(ctx)
 	stats.documentsDeleted = w.cleanupDocuments(ctx)
@@ -88,7 +95,7 @@ func (w *Worker) cleanup(ctx context.Context) {
 		}
 	}
 
-	totalChanged := int64(stats.resultsExpired + stats.inputsExpired + stats.documentsDeleted + stats.orphanUploadsDeleted)
+	totalChanged := int64(stats.resultsExpired + stats.inputsExpired + stats.documentsDeleted + stats.orphanUploadsDeleted + stats.reservationsReleased)
 	totalChanged += stats.notificationsDeleted
 	log := w.logger.Debug
 	if totalChanged > 0 {
@@ -100,9 +107,43 @@ func (w *Worker) cleanup(ctx context.Context) {
 		"inputs_expired", stats.inputsExpired,
 		"documents_deleted", stats.documentsDeleted,
 		"orphan_uploads_deleted", stats.orphanUploadsDeleted,
+		"upload_reservations_released", stats.reservationsReleased,
 		"referenced_uploads_skipped", stats.referencedUploads,
 		"notifications_deleted", stats.notificationsDeleted,
 	)
+}
+
+func (w *Worker) cleanupExpiredReservations(ctx context.Context) int {
+	if w.reservations == nil {
+		return 0
+	}
+	items, err := w.reservations.ListExpiredUploads(ctx, time.Now(), 100)
+	if err != nil {
+		w.logger.Error("list expired upload reservations failed", "error", err)
+		return 0
+	}
+	released := 0
+	for _, item := range items {
+		didRelease, err := w.reservations.ReleaseUpload(ctx, item.UserID, item.ObjectKey)
+		if err != nil {
+			w.logger.Error("release expired upload bytes failed", "objectKey", item.ObjectKey, "error", err)
+			continue
+		}
+		if !didRelease {
+			// Submission consumed the reservation after it was listed. The input is now
+			// document-owned and must not be deleted by the reservation cleanup path.
+			continue
+		}
+		released++
+		if w.objects != nil {
+			if err := w.objects.Delete(ctx, item.ObjectKey); err != nil {
+				// The reservation is already refunded atomically. Orphan cleanup will retry
+				// deletion without risking removal of a document-owned object.
+				w.logger.Error("delete expired reserved upload failed", "objectKey", item.ObjectKey, "error", err)
+			}
+		}
+	}
+	return released
 }
 
 func (w *Worker) cleanupOrphanUploads(ctx context.Context) (deleted, referencedCount int) {

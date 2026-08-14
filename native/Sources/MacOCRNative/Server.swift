@@ -9,7 +9,6 @@ private let maxCallbackBytes = 1 * 1024 * 1024
 
 public actor NativeWorkerState {
     public var operatorLimit: Int
-    public var active: Int
     public var configVersion: UInt64
     public var sequence: UInt64
     public let nodeId: String
@@ -17,16 +16,39 @@ public actor NativeWorkerState {
     public let authSecret: String
     public let session: URLSession
     private let logger: NativeLogHandler
+    private let adaptivePolicy: NativeAdaptiveConcurrencyPolicy
+    private let resourceProbe: any NativeResourceProbing
+    private var effectiveLimit: Int
+    private var activeUnits: Int
+    private var allocations: [String: Int]
+    private var resourceReason: String
+    private var growthCandidate: Int?
+    private var growthSamples: Int
 
-    public init(operatorLimit: Int, authSecret: String, nodeId: String, logger: @escaping NativeLogHandler = { _, _ in }) {
+    public init(
+        operatorLimit: Int,
+        authSecret: String,
+        nodeId: String,
+        adaptivePolicy: NativeAdaptiveConcurrencyPolicy = .configured(),
+        resourceProbe: any NativeResourceProbing = NativeSystemResourceProbe(),
+        logger: @escaping NativeLogHandler = { _, _ in }
+    ) {
         self.operatorLimit = max(0, operatorLimit)
-        self.active = 0
         self.configVersion = 1
         self.sequence = 0
         self.nodeId = nodeId
         self.bootId = "boot_\(UInt64(Date().timeIntervalSince1970 * 1000))"
         self.authSecret = authSecret
         self.logger = logger
+        self.adaptivePolicy = adaptivePolicy
+        self.resourceProbe = resourceProbe
+        let initialDecision = adaptivePolicy.decision(operatorLimit: max(0, operatorLimit), snapshot: resourceProbe.snapshot())
+        self.effectiveLimit = initialDecision.limit
+        self.activeUnits = 0
+        self.allocations = [:]
+        self.resourceReason = initialDecision.reason
+        self.growthCandidate = nil
+        self.growthSamples = 0
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
@@ -34,35 +56,77 @@ public actor NativeWorkerState {
         self.session = URLSession(configuration: config)
     }
 
-    public func tryAcquireSlot() -> (accepted: Bool, capacity: NativeCapacity) {
-        if operatorLimit == 0 || active >= operatorLimit {
-            return (false, getCapacity())
+    public func tryAcquireSlot(attemptID: String, mediaType: String?) -> (accepted: Bool, capacity: NativeCapacity) {
+        refreshAdaptiveLimit()
+        let units = adaptivePolicy.units(for: mediaType)
+        if operatorLimit == 0 || allocations[attemptID] != nil || activeUnits + units > effectiveLimit {
+            return (false, capacity())
         }
-        active += 1
-        return (true, getCapacity())
+        allocations[attemptID] = units
+        activeUnits += units
+        return (true, capacity())
     }
 
-    public func releaseSlot() -> (sequence: UInt64, capacity: NativeCapacity) {
-        if active > 0 {
-            active -= 1
+    public func releaseSlot(attemptID: String) -> (sequence: UInt64, capacity: NativeCapacity) {
+        if let units = allocations.removeValue(forKey: attemptID) {
+            activeUnits = max(0, activeUnits - units)
         }
         sequence += 1
-        return (sequence, getCapacity())
+        refreshAdaptiveLimit()
+        return (sequence, capacity())
     }
 
     public func updateOperatorLimit(_ newLimit: Int) -> NativeCapacity {
         operatorLimit = max(0, newLimit)
         configVersion += 1
-        logger(.info, "Runtime concurrency limit changed to \(operatorLimit)")
-        return getCapacity()
+        refreshAdaptiveLimit()
+        logger(.info, "Runtime concurrency ceiling changed to \(operatorLimit)")
+        return capacity()
     }
 
     public func getCapacity() -> NativeCapacity {
-        let available = max(0, operatorLimit - active)
+        refreshAdaptiveLimit()
+        return capacity()
+    }
+
+    private func refreshAdaptiveLimit() {
+        let decision = adaptivePolicy.decision(operatorLimit: operatorLimit, snapshot: resourceProbe.snapshot())
+        let oldLimit = effectiveLimit
+        if decision.limit < effectiveLimit {
+            effectiveLimit = decision.limit
+            growthCandidate = nil
+            growthSamples = 0
+        } else if decision.limit > effectiveLimit {
+            if growthCandidate == decision.limit {
+                growthSamples += 1
+            } else {
+                growthCandidate = decision.limit
+                growthSamples = 1
+            }
+            if growthSamples >= adaptivePolicy.recoverySamples {
+                effectiveLimit = decision.limit
+                growthCandidate = nil
+                growthSamples = 0
+            }
+        } else {
+            growthCandidate = nil
+            growthSamples = 0
+        }
+        resourceReason = decision.reason
+        if effectiveLimit != oldLimit {
+            configVersion += 1
+            logger(.info, "Adaptive capacity changed effective=\(effectiveLimit) ceiling=\(operatorLimit) reason=\(resourceReason)")
+        }
+    }
+
+    private func capacity() -> NativeCapacity {
+        let active = allocations.count
+        let availableUnits = max(0, effectiveLimit - activeUnits)
+        let available = availableUnits / max(1, adaptivePolicy.imageJobUnits)
         let state: String
         if operatorLimit == 0 {
             state = "paused"
-        } else if available == 0 {
+        } else if availableUnits == 0 {
             state = "busy"
         } else {
             state = "ready"
@@ -71,9 +135,15 @@ public actor NativeWorkerState {
             configVersion: configVersion,
             state: state,
             operatorLimit: operatorLimit,
-            effectiveLimit: operatorLimit,
+            effectiveLimit: effectiveLimit,
             active: active,
-            available: available
+            available: available,
+            activeUnits: activeUnits,
+            availableUnits: availableUnits,
+            imageJobUnits: adaptivePolicy.imageJobUnits,
+            pdfJobUnits: adaptivePolicy.pdfJobUnits,
+            adaptive: adaptivePolicy.enabled,
+            resourceReason: resourceReason
         )
     }
 
@@ -130,7 +200,7 @@ public actor NativeWorkerState {
             logger(.error, "OCR failed document=\(request.documentId) attempt=\(request.attemptId): \(error.localizedDescription)")
         }
 
-        let (seq, cap) = releaseSlot()
+        let (seq, cap) = releaseSlot(attemptID: request.attemptId)
 
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -395,7 +465,7 @@ public final class NativeHTTPServer {
                     return
                 }
 
-                let (slotAccepted, cap) = await state.tryAcquireSlot()
+                let (slotAccepted, cap) = await state.tryAcquireSlot(attemptID: ocrReq.attemptId, mediaType: ocrReq.input.mediaType)
                 if !slotAccepted {
                     logger(.warning, "OCR request rejected because capacity is unavailable document=\(ocrReq.documentId)")
                     let payload = CapacityUnavailableResponse(error: "capacity unavailable", capacity: cap)
@@ -415,7 +485,7 @@ public final class NativeHTTPServer {
                 sendResponse(connection: connection, status: 202, body: acceptedJSON) { [self] sendError in
                     if let sendError {
                         logger(.error, "OCR acknowledgement failed document=\(ocrReq.documentId): \(sendError.localizedDescription)")
-                        Task { _ = await state.releaseSlot() }
+                        Task { _ = await state.releaseSlot(attemptID: ocrReq.attemptId) }
                         return
                     }
                     Task.detached { [self] in

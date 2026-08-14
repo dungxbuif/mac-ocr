@@ -27,6 +27,9 @@ var (
 	ErrRateLimited = errors.New("rate limited")
 	// ErrQuotaExceeded is returned when a request exceeds the user's doc quota.
 	ErrQuotaExceeded = errors.New("quota exceeded")
+	// ErrStorageQuotaExceeded is returned when retained and reserved input bytes
+	// would exceed the account's aggregate storage quota.
+	ErrStorageQuotaExceeded = errors.New("storage byte quota exceeded")
 	// ErrUserDisabled is returned when the account has been disabled by an admin.
 	ErrUserDisabled = errors.New("user account is disabled")
 )

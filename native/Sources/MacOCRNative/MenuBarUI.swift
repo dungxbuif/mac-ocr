@@ -86,7 +86,7 @@ public struct ControlPanelView: View {
                     }
                     Stepper(value: Binding(get: { controller.operatorLimit }, set: { controller.updateOperatorLimit($0) }), in: 0...256) {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("Concurrency").font(.caption2).foregroundStyle(.secondary)
+                            Text("Concurrency ceiling").font(.caption2).foregroundStyle(.secondary)
                             Text("\(controller.operatorLimit)").fontDesign(.monospaced)
                         }
                     }
@@ -161,7 +161,7 @@ public struct ControlPanelView: View {
 
     private var capacityText: String {
         guard let capacity = controller.capacity else { return "—" }
-        return "\(capacity.active) active · \(capacity.available) available · limit \(capacity.operatorLimit)"
+        return "\(capacity.active) jobs · \(capacity.availableUnits) units free · adaptive \(capacity.effectiveLimit)/\(capacity.operatorLimit)"
     }
 
     private func detailRow(_ label: String, value: String) -> some View {

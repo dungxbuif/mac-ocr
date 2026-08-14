@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"macocr/proxy/domain"
 	"macocr/proxy/internal/errs"
 	"macocr/proxy/internal/usecase/document"
 )
@@ -17,17 +18,39 @@ type PresignedUploadRepository interface {
 	SourceURLForKey(key string) string
 }
 
-type UploadHandler struct {
-	objects        PresignedUploadRepository
-	maxUploadBytes int64
-	ttl            time.Duration
+type accountConfigInvalidator interface {
+	InvalidateAccountConfig(ctx context.Context, userID int64)
 }
 
-func NewUploadHandler(objects PresignedUploadRepository, maxUploadBytes int64) *UploadHandler {
+type UploadHandler struct {
+	objects        PresignedUploadRepository
+	reservations   domain.UploadReservationRepository
+	maxUploadBytes int64
+	ttl            time.Duration
+	reservationTTL time.Duration
+	invalidator    accountConfigInvalidator
+}
+
+func NewUploadHandler(objects PresignedUploadRepository, maxUploadBytes int64, repositories ...domain.UploadReservationRepository) *UploadHandler {
+	var reservations domain.UploadReservationRepository
+	if len(repositories) > 0 {
+		reservations = repositories[0]
+	}
+	return NewUploadHandlerWithReservationTTL(objects, maxUploadBytes, reservations, 24*time.Hour)
+}
+
+func NewUploadHandlerWithReservationTTL(objects PresignedUploadRepository, maxUploadBytes int64, reservations domain.UploadReservationRepository, reservationTTL time.Duration, invalidators ...accountConfigInvalidator) *UploadHandler {
 	if maxUploadBytes <= 0 {
 		maxUploadBytes = document.MaxUploadedObjectBytes
 	}
-	return &UploadHandler{objects: objects, maxUploadBytes: maxUploadBytes, ttl: 15 * time.Minute}
+	if reservationTTL <= 0 {
+		reservationTTL = 24 * time.Hour
+	}
+	var invalidator accountConfigInvalidator
+	if len(invalidators) > 0 {
+		invalidator = invalidators[0]
+	}
+	return &UploadHandler{objects: objects, reservations: reservations, invalidator: invalidator, maxUploadBytes: maxUploadBytes, ttl: 15 * time.Minute, reservationTTL: reservationTTL}
 }
 
 type presignUploadReq struct {
@@ -76,8 +99,27 @@ func (h *UploadHandler) Presign(c *gin.Context) {
 	}
 
 	key := document.MakeUploadKey(k.UserID, req.Filename)
+	expiresAt := time.Now().UTC().Add(h.ttl)
+	reservationExpiresAt := time.Now().UTC().Add(h.reservationTTL)
+	if h.reservations == nil {
+		RespondError(c, domain.ErrStorageUnavailable)
+		return
+	}
+	if err := h.reservations.ReserveUpload(c.Request.Context(), domain.UploadReservation{
+		ObjectKey: key, UserID: k.UserID, SizeBytes: req.SizeBytes, ExpiresAt: reservationExpiresAt,
+	}); err != nil {
+		RespondError(c, err)
+		return
+	}
+	if h.invalidator != nil {
+		h.invalidator.InvalidateAccountConfig(c.Request.Context(), k.UserID)
+	}
 	uploadURL, signedHeaders, err := h.objects.PresignPutURL(c.Request.Context(), key, req.ContentType, req.SizeBytes, h.ttl)
 	if err != nil {
+		_, _ = h.reservations.ReleaseUpload(c.Request.Context(), k.UserID, key)
+		if h.invalidator != nil {
+			h.invalidator.InvalidateAccountConfig(c.Request.Context(), k.UserID)
+		}
 		RespondError(c, err)
 		return
 	}
@@ -93,14 +135,14 @@ func (h *UploadHandler) Presign(c *gin.Context) {
 		headers["Content-Type"] = req.ContentType
 	}
 
-	expiresAt := time.Now().UTC().Add(h.ttl)
 	c.JSON(http.StatusCreated, gin.H{
-		"uploadUrl":      uploadURL,
-		"sourceUrl":      h.objects.SourceURLForKey(key),
-		"method":         "PUT",
-		"expiresAt":      expiresAt,
-		"maxUploadBytes": h.maxUploadBytes,
-		"sizeBytes":      req.SizeBytes,
-		"headers":        headers,
+		"uploadUrl":            uploadURL,
+		"sourceUrl":            h.objects.SourceURLForKey(key),
+		"method":               "PUT",
+		"expiresAt":            expiresAt,
+		"reservationExpiresAt": reservationExpiresAt,
+		"maxUploadBytes":       h.maxUploadBytes,
+		"sizeBytes":            req.SizeBytes,
+		"headers":              headers,
 	})
 }

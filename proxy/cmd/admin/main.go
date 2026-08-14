@@ -180,21 +180,31 @@ func handleCreateUser(ctx context.Context, svc *auth.Service, args []string) {
 	email := fs.String("email", "", "User email address (required)")
 	rate := fs.Int("rate", 60, "Rate limit in requests per minute (0 = unlimited)")
 	quota := fs.Int64("quota", 0, "Doc quota limit per cycle (0 = unlimited)")
+	storageGB := fs.Int64("storage-gb", 0, "Aggregate retained/reserved input quota in GiB (0 = unlimited)")
+	storageBytesFlag := fs.Int64("storage-bytes", -1, "Exact aggregate input quota in bytes (overrides --storage-gb; intended for tests/automation)")
 	_ = fs.Parse(args)
 
 	if *email == "" {
 		fmt.Fprintln(os.Stderr, "Error: --email is required")
 		os.Exit(1)
 	}
+	if *storageGB < 0 || *storageGB > maxStorageGiB() {
+		fmt.Fprintf(os.Stderr, "Error: --storage-gb must be between 0 and %d\n", maxStorageGiB())
+		os.Exit(1)
+	}
 
-	u, err := svc.CreateUser(ctx, *email, domain.RoleUser, "", rate, quota)
+	storageBytes := *storageGB * 1024 * 1024 * 1024
+	if *storageBytesFlag >= 0 {
+		storageBytes = *storageBytesFlag
+	}
+	u, err := svc.CreateUser(ctx, *email, domain.RoleUser, "", rate, quota, &storageBytes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating user: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("✓ User created successfully:\n  ID:             %d\n  Email:          %s\n  Role:           %s\n  Rate Limit:     %d rpm\n  Doc Quota:      %d docs\n",
-		u.ID, u.Email, u.Role, u.Config.RateLimitRPM, u.Config.DocQuota)
+	fmt.Printf("✓ User created successfully:\n  ID:             %d\n  Email:          %s\n  Role:           %s\n  Rate Limit:     %d rpm\n  Doc Quota:      %d docs\n  Storage Quota:  %d bytes\n",
+		u.ID, u.Email, u.Role, u.Config.RateLimitRPM, u.Config.DocQuota, u.Config.StorageQuotaBytes)
 }
 
 func handleListUsers(ctx context.Context, svc *auth.Service) {
@@ -210,8 +220,8 @@ func handleListUsers(ctx context.Context, svc *auth.Service) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 4, 8, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tEMAIL\tROLE\tSTATUS\tRATE(RPM)\tDOC QUOTA\tDOC USED\tCREATED AT")
-	fmt.Fprintln(w, "--\t-----\t----\t------\t---------\t---------\t--------\t----------")
+	fmt.Fprintln(w, "ID\tEMAIL\tROLE\tSTATUS\tRATE(RPM)\tDOC QUOTA\tDOC USED\tSTORAGE QUOTA\tSTORAGE USED\tRESERVED\tCREATED AT")
+	fmt.Fprintln(w, "--\t-----\t----\t------\t---------\t---------\t--------\t-------------\t------------\t--------\t----------")
 
 	for _, u := range users {
 		status := "Active"
@@ -221,10 +231,14 @@ func handleListUsers(ctx context.Context, svc *auth.Service) {
 		rpm := 60
 		quota := int64(0)
 		used := int64(0)
+		storageQuota, storageUsed, storageReserved := int64(0), int64(0), int64(0)
 		if u.Config != nil {
 			rpm = u.Config.RateLimitRPM
 			quota = u.Config.DocQuota
 			used = u.Config.DocUsed
+			storageQuota = u.Config.StorageQuotaBytes
+			storageUsed = u.Config.StorageUsedBytes
+			storageReserved = u.Config.StorageReservedBytes
 		}
 
 		quotaStr := "unlimited"
@@ -236,8 +250,12 @@ func handleListUsers(ctx context.Context, svc *auth.Service) {
 			rpmStr = fmt.Sprintf("%d", rpm)
 		}
 
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
-			u.ID, u.Email, u.Role, status, rpmStr, quotaStr, used, u.CreatedAt.Format("2006-01-02 15:04"))
+		storageQuotaStr := "unlimited"
+		if storageQuota > 0 {
+			storageQuotaStr = fmt.Sprintf("%d", storageQuota)
+		}
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%d\t%s\n",
+			u.ID, u.Email, u.Role, status, rpmStr, quotaStr, used, storageQuotaStr, storageUsed, storageReserved, u.CreatedAt.Format("2006-01-02 15:04"))
 	}
 	_ = w.Flush()
 }
@@ -247,10 +265,16 @@ func handleSetLimits(ctx context.Context, svc *auth.Service, args []string) {
 	userID := fs.Int64("user-id", 0, "User ID (required)")
 	rate := fs.Int("rate", -1, "New rate limit rpm (-1 to leave unchanged, 0 for unlimited)")
 	quota := fs.Int64("quota", -1, "New doc quota (-1 to leave unchanged, 0 for unlimited)")
+	storageGB := fs.Int64("storage-gb", -1, "New aggregate storage quota in GiB (-1 unchanged, 0 unlimited)")
+	storageBytesFlag := fs.Int64("storage-bytes", -1, "Exact aggregate storage quota in bytes (-1 unchanged; overrides --storage-gb)")
 	_ = fs.Parse(args)
 
 	if *userID <= 0 {
 		fmt.Fprintln(os.Stderr, "Error: --user-id is required")
+		os.Exit(1)
+	}
+	if *storageGB < -1 || *storageGB > maxStorageGiB() {
+		fmt.Fprintf(os.Stderr, "Error: --storage-gb must be between -1 and %d\n", maxStorageGiB())
 		os.Exit(1)
 	}
 
@@ -262,20 +286,33 @@ func handleSetLimits(ctx context.Context, svc *auth.Service, args []string) {
 	if *quota >= 0 {
 		quotaPtr = quota
 	}
+	var storagePtr *int64
+	if *storageBytesFlag >= 0 {
+		value := *storageBytesFlag
+		storagePtr = &value
+	} else if *storageGB >= 0 {
+		value := *storageGB * 1024 * 1024 * 1024
+		storagePtr = &value
+	}
 
-	if ratePtr == nil && quotaPtr == nil {
-		fmt.Fprintln(os.Stderr, "Error: specify at least one of --rate or --quota")
+	if ratePtr == nil && quotaPtr == nil && storagePtr == nil {
+		fmt.Fprintln(os.Stderr, "Error: specify at least one of --rate, --quota, or --storage-gb")
 		os.Exit(1)
 	}
 
-	cfg, err := svc.UpdateAccountConfig(ctx, *userID, ratePtr, quotaPtr, nil)
+	cfg, err := svc.UpdateAccountConfig(ctx, *userID, ratePtr, quotaPtr, nil, storagePtr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error updating limits: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("✓ Limits updated for User ID=%d:\n  Rate Limit: %d rpm\n  Doc Quota:  %d docs\n  Doc Used:   %d docs\n",
-		cfg.UserID, cfg.RateLimitRPM, cfg.DocQuota, cfg.DocUsed)
+	fmt.Printf("✓ Limits updated for User ID=%d:\n  Rate Limit:    %d rpm\n  Doc Quota:     %d docs\n  Doc Used:      %d docs\n  Storage Quota: %d bytes\n  Storage Used:  %d bytes\n  Reserved:      %d bytes\n",
+		cfg.UserID, cfg.RateLimitRPM, cfg.DocQuota, cfg.DocUsed, cfg.StorageQuotaBytes, cfg.StorageUsedBytes, cfg.StorageReservedBytes)
+}
+
+func maxStorageGiB() int64 {
+	const bytesPerGiB int64 = 1 << 30
+	return int64(^uint64(0)>>1) / bytesPerGiB
 }
 
 func handleResetQuota(ctx context.Context, svc *auth.Service, args []string) {

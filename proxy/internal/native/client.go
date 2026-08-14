@@ -115,7 +115,7 @@ func (c *Client) GetHealth(ctx context.Context) error {
 
 func (c *Client) GetCapacity(ctx context.Context) (*domain.NativeCapacity, error) {
 	if c.baseURL == "" {
-		return &domain.NativeCapacity{State: "ready", OperatorLimit: 1, EffectiveLimit: 1, Available: 1}, nil
+		return &domain.NativeCapacity{State: "ready", OperatorLimit: 1, EffectiveLimit: 1, Available: 1, AvailableUnits: 1, ImageJobUnits: 1, PDFJobUnits: 1}, nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/capacity", nil)
 	if err != nil {

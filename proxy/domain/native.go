@@ -9,6 +9,12 @@ type NativeCapacity struct {
 	EffectiveLimit int    `json:"effectiveLimit"`
 	Active         int    `json:"active"`
 	Available      int    `json:"available"`
+	ActiveUnits    int    `json:"activeUnits"`
+	AvailableUnits int    `json:"availableUnits"`
+	ImageJobUnits  int    `json:"imageJobUnits"`
+	PDFJobUnits    int    `json:"pdfJobUnits"`
+	Adaptive       bool   `json:"adaptive"`
+	ResourceReason string `json:"resourceReason,omitempty"`
 	Reason         string `json:"reason,omitempty"`
 }
 
