@@ -338,6 +338,9 @@ func (m *mockKeyRepo) GetByHash(ctx context.Context, hash string) (*domain.ApiKe
 	return nil, domain.ErrNotFound
 }
 func (m *mockKeyRepo) Revoke(ctx context.Context, id int64) error { return nil }
+func (m *mockKeyRepo) UpdateRateLimit(ctx context.Context, id int64, rateLimitRPM int) (*domain.ApiKey, error) {
+	return nil, nil
+}
 
 func TestDocumentService_SubmitSingleAndBatch(t *testing.T) {
 	ctx := context.Background()

@@ -1,9 +1,11 @@
 package rest
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -83,20 +85,22 @@ type AdminSession struct {
 }
 
 type SessionManager struct {
-	mu       sync.RWMutex
-	sessions map[string]*AdminSession
+	redis redisSessionRepo
 }
 
-func NewSessionManager() *SessionManager {
+type redisSessionRepo interface {
+	SetSession(ctx context.Context, token string, data []byte, ttl time.Duration) error
+	GetSession(ctx context.Context, token string) ([]byte, error)
+	DeleteSession(ctx context.Context, token string) error
+}
+
+func NewSessionManager(r redisSessionRepo) *SessionManager {
 	return &SessionManager{
-		sessions: make(map[string]*AdminSession),
+		redis: r,
 	}
 }
 
 func (sm *SessionManager) Create(user *domain.User) (token string, csrfToken string) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
 	tokenBytes := make([]byte, 32)
 	csrfBytes := make([]byte, 16)
 	_, _ = rand.Read(tokenBytes)
@@ -105,34 +109,47 @@ func (sm *SessionManager) Create(user *domain.User) (token string, csrfToken str
 	token = hex.EncodeToString(tokenBytes)
 	csrfToken = hex.EncodeToString(csrfBytes)
 
-	sm.sessions[token] = &AdminSession{
+	sess := &AdminSession{
 		UserID:    user.ID,
 		Email:     user.Email,
 		Role:      user.Role,
 		CSRFToken: csrfToken,
 		ExpiresAt: time.Now().Add(SessionDuration),
 	}
+
+	if sm.redis != nil {
+		data, err := json.Marshal(sess)
+		if err == nil {
+			_ = sm.redis.SetSession(context.Background(), token, data, SessionDuration)
+		}
+	}
+
 	return token, csrfToken
 }
 
 func (sm *SessionManager) Get(token string) (*AdminSession, bool) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	if sm.redis == nil {
+		return nil, false
+	}
+	data, err := sm.redis.GetSession(context.Background(), token)
+	if err != nil || len(data) == 0 {
+		return nil, false
+	}
 
-	s, ok := sm.sessions[token]
-	if !ok {
+	var sess AdminSession
+	if err := json.Unmarshal(data, &sess); err != nil {
 		return nil, false
 	}
-	if time.Now().After(s.ExpiresAt) {
+	if time.Now().After(sess.ExpiresAt) {
 		return nil, false
 	}
-	return s, true
+	return &sess, true
 }
 
 func (sm *SessionManager) Delete(token string) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	delete(sm.sessions, token)
+	if sm.redis != nil {
+		_ = sm.redis.DeleteSession(context.Background(), token)
+	}
 }
 
 type AdminAuthHandler struct {
@@ -234,6 +251,7 @@ func (h *AdminAuthHandler) Me(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"id":     s.UserID,
 		"userId": s.UserID,
 		"email":  s.Email,
 		"role":   s.Role,

@@ -201,6 +201,15 @@ func (m *mockKeyRepoFull) Revoke(ctx context.Context, id int64) error {
 	return nil
 }
 
+func (m *mockKeyRepoFull) UpdateRateLimit(ctx context.Context, id int64, rateLimitRPM int) (*domain.ApiKey, error) {
+	k, ok := m.keys[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	k.RateLimitRPM = rateLimitRPM
+	return k, nil
+}
+
 type mockObjectRepoFull struct {
 	stored     map[string][]byte
 	presignErr error

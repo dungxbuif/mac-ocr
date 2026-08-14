@@ -27,6 +27,7 @@ type AuthService interface {
 	GetUser(ctx context.Context, id int64) (*domain.User, error)
 	ListUsers(ctx context.Context, limit, offset int) ([]domain.User, error)
 	UpdateUser(ctx context.Context, id int64, email *string, role *domain.Role, disabled *bool) (*domain.User, error)
+	ResetPassword(ctx context.Context, id int64, newPassword string) error
 
 	GetAccountConfig(ctx context.Context, userID int64) (*domain.AccountConfig, error)
 	UpdateAccountConfig(ctx context.Context, userID int64, rateLimitRPM *int, docQuota *int64, adminID *int64, storageQuotaBytes ...*int64) (*domain.AccountConfig, error)
@@ -35,6 +36,7 @@ type AuthService interface {
 	GenerateKey(ctx context.Context, userID int64, name string, rateLimitRPM int) (*auth.GeneratedKey, error)
 	ListKeys(ctx context.Context, userID int64) ([]domain.ApiKey, error)
 	RevokeKey(ctx context.Context, userID, keyID int64) error
+	UpdateKeyRateLimit(ctx context.Context, userID, keyID int64, rateLimitRPM int) (*domain.ApiKey, error)
 	Authenticate(ctx context.Context, raw string) (*domain.ApiKey, error)
 	ValidateActive(ctx context.Context, raw string) (*domain.ApiKey, error)
 }
@@ -49,6 +51,7 @@ func NewAuthHandler(svc AuthService) *AuthHandler {
 
 type createUserReq struct {
 	Email             string      `json:"email" binding:"required,email"`
+	Password          string      `json:"password,omitempty"`
 	Role              domain.Role `json:"role,omitempty" binding:"omitempty,oneof=admin user"`
 	RateLimitRPM      *int        `json:"rate_limit_rpm,omitempty" binding:"omitempty,gte=0"`
 	DocQuota          *int64      `json:"doc_quota,omitempty" binding:"omitempty,gte=0"`
@@ -62,7 +65,12 @@ func (h *AuthHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	u, err := h.svc.CreateUser(c.Request.Context(), req.Email, req.Role, "", req.RateLimitRPM, req.DocQuota, req.StorageQuotaBytes)
+	role := domain.RoleUser
+	if req.Role != "" {
+		role = req.Role
+	}
+
+	u, err := h.svc.CreateUser(c.Request.Context(), req.Email, role, req.Password, req.RateLimitRPM, req.DocQuota, req.StorageQuotaBytes)
 	if err != nil {
 		RespondError(c, err)
 		return
@@ -143,6 +151,12 @@ func (h *AuthHandler) DeactivateUser(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if currentUserID, exists := c.Get(auditUserID); exists {
+		if id, ok := currentUserID.(int64); ok && id == userID {
+			RespondProblem(c, errs.InvalidInput("administrators cannot deactivate their own account"))
+			return
+		}
+	}
 	disabled := true
 	u, err := h.svc.UpdateUser(c.Request.Context(), userID, nil, nil, &disabled)
 	if err != nil {
@@ -150,6 +164,41 @@ func (h *AuthHandler) DeactivateUser(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, u)
+}
+
+func (h *AuthHandler) ReactivateUser(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	disabled := false
+	u, err := h.svc.UpdateUser(c.Request.Context(), userID, nil, nil, &disabled)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, u)
+}
+
+type resetPasswordReq struct {
+	Password string `json:"password" binding:"required,min=8"`
+}
+
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var req resetPasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondProblem(c, errs.InvalidInput(err.Error()))
+		return
+	}
+	if err := h.svc.ResetPassword(c.Request.Context(), userID, req.Password); err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "password reset successfully"})
 }
 
 func (h *AuthHandler) GetAccountConfig(c *gin.Context) {
@@ -263,6 +312,32 @@ func (h *AuthHandler) RevokeAPIKey(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+type updateKeyReq struct {
+	RateLimitRPM *int `json:"rate_limit_rpm" binding:"required,gte=0"`
+}
+
+func (h *AuthHandler) UpdateAPIKey(c *gin.Context) {
+	userID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	keyID, ok := parseID(c, "kid")
+	if !ok {
+		return
+	}
+	var req updateKeyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondProblem(c, errs.InvalidInput(err.Error()))
+		return
+	}
+	k, err := h.svc.UpdateKeyRateLimit(c.Request.Context(), userID, keyID, *req.RateLimitRPM)
+	if err != nil {
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, k)
 }
 
 func (h *AuthHandler) RequireAPIKey() gin.HandlerFunc {

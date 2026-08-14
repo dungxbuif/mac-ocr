@@ -82,4 +82,5 @@ type ApiKeyRepository interface {
 	ListByUser(ctx context.Context, userID int64) ([]ApiKey, error)
 	GetByHash(ctx context.Context, hash string) (*ApiKey, error)
 	Revoke(ctx context.Context, id int64) error
+	UpdateRateLimit(ctx context.Context, id int64, rateLimitRPM int) (*ApiKey, error)
 }

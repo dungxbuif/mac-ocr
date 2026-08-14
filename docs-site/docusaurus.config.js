@@ -41,7 +41,6 @@ export default {
         { to: "/api/API_REFERENCE", label: "API", position: "left" },
         { to: "/api/OCR_RESPONSE", label: "OCR response", position: "left" },
         { to: "/api/MCP_INTEGRATION", label: "MCP", position: "left" },
-        { to: "/integrations/mezon-bot", label: "Mezon Bot", position: "left" },
         { href: "/api/v1/docs", label: "Swagger", position: "right", target: "_blank" },
       ],
     },
@@ -49,7 +48,7 @@ export default {
       style: "light",
       links: [
         { title: "Integrate", items: [{ label: "Quickstart", to: "/guides/onboarding" }, { label: "API reference", to: "/api/API_REFERENCE" }] },
-        { title: "Understand", items: [{ label: "OCR response", to: "/api/OCR_RESPONSE" }, { label: "MCP", to: "/api/MCP_INTEGRATION" }, { label: "Mezon Bot", to: "/integrations/mezon-bot" }] },
+        { title: "Understand", items: [{ label: "OCR response", to: "/api/OCR_RESPONSE" }, { label: "MCP", to: "/api/MCP_INTEGRATION" }] },
       ],
       copyright: `OCR Platform documentation · ${new Date().getFullYear()}`,
     },

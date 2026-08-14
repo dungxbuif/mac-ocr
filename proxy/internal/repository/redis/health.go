@@ -191,3 +191,19 @@ func (r *Repository) DeleteResult(ctx context.Context, documentID string) error 
 	}
 	return nil
 }
+
+func (r *Repository) SetSession(ctx context.Context, token string, data []byte, ttl time.Duration) error {
+	return r.client.Set(ctx, "ocr:session:"+token, data, ttl).Err()
+}
+
+func (r *Repository) GetSession(ctx context.Context, token string) ([]byte, error) {
+	data, err := r.client.Get(ctx, "ocr:session:"+token).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	return data, err
+}
+
+func (r *Repository) DeleteSession(ctx context.Context, token string) error {
+	return r.client.Del(ctx, "ocr:session:"+token).Err()
+}

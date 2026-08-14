@@ -4,19 +4,19 @@ import ComponentCreator from '@docusaurus/ComponentCreator';
 export default [
   {
     path: '/',
-    component: ComponentCreator('/', '244'),
+    component: ComponentCreator('/', '43e'),
     routes: [
       {
         path: '/',
-        component: ComponentCreator('/', 'f5f'),
+        component: ComponentCreator('/', '29e'),
         routes: [
           {
             path: '/',
-            component: ComponentCreator('/', 'ee4'),
+            component: ComponentCreator('/', 'c5e'),
             routes: [
               {
                 path: '/api/API_REFERENCE',
-                component: ComponentCreator('/api/API_REFERENCE', 'c6f'),
+                component: ComponentCreator('/api/API_REFERENCE', '386'),
                 exact: true,
                 sidebar: "docsSidebar"
               },
@@ -28,7 +28,7 @@ export default [
               },
               {
                 path: '/api/OCR_RESPONSE',
-                component: ComponentCreator('/api/OCR_RESPONSE', '273'),
+                component: ComponentCreator('/api/OCR_RESPONSE', 'e7c'),
                 exact: true,
                 sidebar: "docsSidebar"
               },
@@ -39,24 +39,18 @@ export default [
               },
               {
                 path: '/guides/onboarding',
-                component: ComponentCreator('/guides/onboarding', '598'),
-                exact: true,
-                sidebar: "docsSidebar"
-              },
-              {
-                path: '/integrations/mezon-bot',
-                component: ComponentCreator('/integrations/mezon-bot', '240'),
+                component: ComponentCreator('/guides/onboarding', '356'),
                 exact: true,
                 sidebar: "docsSidebar"
               },
               {
                 path: '/RELEASE_NOTES',
-                component: ComponentCreator('/RELEASE_NOTES', '054'),
+                component: ComponentCreator('/RELEASE_NOTES', '854'),
                 exact: true
               },
               {
                 path: '/',
-                component: ComponentCreator('/', 'cc0'),
+                component: ComponentCreator('/', '51b'),
                 exact: true,
                 sidebar: "docsSidebar"
               }

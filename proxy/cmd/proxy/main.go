@@ -94,7 +94,7 @@ func main() {
 	sched := scheduler.New(docRepo, objRepo, nativeClient, authSvc, callbackURL, logger, cfg.ProcessingLease, cfg.ProcessingMaxAttempts, notificationSvc)
 	go sched.Run(ctx)
 
-	sessionMgr := rest.NewSessionManager()
+	sessionMgr := rest.NewSessionManager(redisRepo)
 	adminAuthHandler := rest.NewAdminAuthHandler(userRepo, docSvc, sessionMgr, cfg.Env == "production")
 
 	healthHandler := rest.NewHealthHandler(systemSvc)

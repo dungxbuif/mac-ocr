@@ -87,3 +87,22 @@ func (r *APIKeyRepository) Revoke(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+func (r *APIKeyRepository) UpdateRateLimit(ctx context.Context, id int64, rateLimitRPM int) (*domain.ApiKey, error) {
+	if rateLimitRPM < 0 {
+		rateLimitRPM = 0
+	}
+	var out domain.ApiKey
+	err := r.pool.QueryRow(ctx,
+		`UPDATE api_keys SET rate_limit_rpm = $1 WHERE id = $2
+		 RETURNING id, user_id, name, key_prefix, rate_limit_rpm, revoked_at, created_at`,
+		rateLimitRPM, id,
+	).Scan(&out.ID, &out.UserID, &out.Name, &out.Prefix, &out.RateLimitRPM, &out.RevokedAt, &out.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update api_key rate_limit: %w", err)
+	}
+	return &out, nil
+}

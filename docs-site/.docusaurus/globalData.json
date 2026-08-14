@@ -31,11 +31,6 @@
               "sidebar": "docsSidebar"
             },
             {
-              "id": "integrations/mezon-bot",
-              "path": "/integrations/mezon-bot",
-              "sidebar": "docsSidebar"
-            },
-            {
               "id": "README",
               "path": "/",
               "sidebar": "docsSidebar"

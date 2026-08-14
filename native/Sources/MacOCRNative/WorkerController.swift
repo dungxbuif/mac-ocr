@@ -59,9 +59,12 @@ public final class WorkerController: ObservableObject {
         }
 
         let defaultProxy = buildDefault("MacOCRDefaultProxyURL", fallback: "http://localhost:8080")
+        // A built app bundle is the deployment authority for mode: its MacOCRDefaultMode
+        // must win over an ambient APP_ENV (the proxy/web knob) so a production bundle
+        // never silently flips to development on a host that exports APP_ENV. The native
+        // runtime override MACOCR_MODE still takes precedence for operators.
         let defaultMode = environment["MACOCR_MODE"]
-            ?? environment["APP_ENV"]
-            ?? buildDefault("MacOCRDefaultMode", fallback: "development")
+            ?? buildDefault("MacOCRDefaultMode", fallback: environment["APP_ENV"] ?? "development")
         let defaultPort = Int(buildDefault("MacOCRDefaultPort", fallback: environment["NATIVE_PORT"] ?? "8787")) ?? 8787
         let defaultLimit = Int(buildDefault("MacOCRDefaultLimit", fallback: environment["NATIVE_LIMIT"] ?? "6")) ?? 6
         let requestedNode = buildDefault("MacOCRDefaultNodeID", fallback: environment["NATIVE_NODE_ID"] ?? "ocr-native-01")

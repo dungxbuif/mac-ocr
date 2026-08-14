@@ -15,7 +15,8 @@ type Config struct {
 	MezonPort   string
 	OCRProxyURL string
 	OCRAPIKey   string
-	RedisURL    string
+	DatabaseURL string // PostgreSQL. When set, quota + sessions persist there (multi-replica safe). Empty => SQLite fallback.
+	RedisURL    string // Redis. When set, dedup + L2 channel cache are shared across replicas.
 
 	// LLM Agent Configuration
 	LLMBaseURL string
@@ -37,6 +38,7 @@ func Load() (*Config, error) {
 		MezonPort:   getEnvOrDefault("MEZON_PORT", "443"),
 		OCRProxyURL: getEnvOrDefault("OCR_PROXY_URL", "http://localhost:8080"),
 		OCRAPIKey:   os.Getenv("OCR_API_KEY"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
 		RedisURL:    os.Getenv("REDIS_URL"),
 
 		LLMBaseURL: os.Getenv("LLM_BASE_URL"),

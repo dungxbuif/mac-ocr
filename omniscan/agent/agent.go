@@ -33,6 +33,29 @@ func New(baseURL, apiKey, model string) *Agent {
 	}
 }
 
+// Health pings the LLM endpoint to confirm it is reachable and the API key is
+// valid. It calls GET /v1/models (no tokens generated), so it is cheap and
+// works against any OpenAI-compatible server (LM Studio, vLLM, OpenAI, ...).
+// Call at bot startup so the operator sees immediately whether the *scan AI
+// flow will work; the *ocr raw flow does not use the LLM and is unaffected.
+func (a *Agent) Health(ctx context.Context) error {
+	_, err := a.client.ListModels(ctx)
+	return err
+}
+
+// healthy is the cached result of the startup health check, read by the bot
+// to decide whether *scan should attempt the AI call or fail fast with a
+// clear message. It is set once at startup; a later recovery is not detected
+// automatically, which is acceptable for a dev/internal bot.
+var healthy bool
+
+// SetHealth records the startup LLM probe result so the bot can tailor its
+// *scan error message instead of letting the first real call time out.
+func (a *Agent) SetHealth(ok bool) { healthy = ok }
+
+// IsHealthy reports whether the startup LLM probe succeeded.
+func (a *Agent) IsHealthy() bool { return healthy }
+
 func (a *Agent) ClassifyAndFormat(ctx context.Context, ocrText string) (*ClassifyResult, error) {
 	systemPrompt := `Bạn là AI Agent trợ lý phân tích tài liệu chuyên nghiệp. 
 Nhiệm vụ của bạn:

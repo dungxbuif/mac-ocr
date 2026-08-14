@@ -72,7 +72,7 @@ public struct ControlPanelView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     Spacer()
-                    Text("set by environment")
+                    Text("Mode: \(controller.mode)")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }

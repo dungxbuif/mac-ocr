@@ -50,6 +50,15 @@ swift build -c release
 
 Build web assets before the Go binary because both are embedded at compile time.
 
+For the menu-bar app bundle, pass the production connection defaults to `native/scripts/build-app.sh` (for example `MACOCR_DEFAULT_PROXY_URL=https://ocr.dungxbuif.com`, `MACOCR_DEFAULT_MODE=production`, `MACOCR_DEFAULT_AUTH_SECRET=<shared NATIVE_AUTH_SECRET>`). A previous dev build that saved `http://localhost:8080` in UserDefaults or an old connection key in Keychain keeps those values after installing the production bundle, because saved settings override the bundle defaults on launch. Clear the saved state before relaunching so the production bundle reseed from `Info.plist`:
+
+```bash
+defaults delete com.macocr.native
+security delete-generic-password -a native-auth-secret -s com.macocr.native
+```
+
+See `native/README.md` for the full build-time default inventory and the mode precedence rules.
+
 ### Docker Container build
 
 Alternatively, build the containerized proxy image using the multi-stage `Dockerfile` from the repository root:

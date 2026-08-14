@@ -74,10 +74,19 @@ func (s *Service) CreateUser(
 		role = domain.RoleUser
 	}
 
+	var passwordHash string
+	if strings.TrimSpace(password) != "" {
+		h, err := HashPassword(password)
+		if err != nil {
+			return nil, fmt.Errorf("hash password: %w", err)
+		}
+		passwordHash = h
+	}
+
 	u := &domain.User{
 		Email:        email,
 		Role:         role,
-		PasswordHash: password,
+		PasswordHash: passwordHash,
 		Disabled:     false,
 	}
 
@@ -172,6 +181,23 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, email *string, role 
 		updated.Config = cfg
 	}
 	return updated, nil
+}
+
+func (s *Service) ResetPassword(ctx context.Context, id int64, newPassword string) error {
+	u, err := s.users.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(newPassword) == "" {
+		return domain.ErrBadParamInput
+	}
+	h, err := HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	u.PasswordHash = h
+	_, err = s.users.Update(ctx, u)
+	return err
 }
 
 func (s *Service) GetAccountConfig(ctx context.Context, userID int64) (*domain.AccountConfig, error) {
@@ -326,6 +352,26 @@ func (s *Service) RevokeKey(ctx context.Context, userID, keyID int64) error {
 		}
 	}
 	return domain.ErrNotFound
+}
+
+func (s *Service) UpdateKeyRateLimit(ctx context.Context, userID, keyID int64, rateLimitRPM int) (*domain.ApiKey, error) {
+	keys, err := s.keys.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range keys {
+		if k.ID == keyID {
+			updated, err := s.keys.UpdateRateLimit(ctx, keyID, rateLimitRPM)
+			if err != nil {
+				return nil, err
+			}
+			if s.keyCache != nil {
+				_ = s.keyCache.DeleteAPIKeysByUser(ctx, userID)
+			}
+			return updated, nil
+		}
+	}
+	return nil, domain.ErrNotFound
 }
 
 func (s *Service) Authenticate(ctx context.Context, raw string) (*domain.ApiKey, error) {

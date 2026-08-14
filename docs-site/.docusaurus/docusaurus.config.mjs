@@ -90,11 +90,6 @@ export default {
           "position": "left"
         },
         {
-          "to": "/integrations/mezon-bot",
-          "label": "Mezon Bot",
-          "position": "left"
-        },
-        {
           "href": "/api/v1/docs",
           "label": "Swagger",
           "position": "right",
@@ -129,10 +124,6 @@ export default {
             {
               "label": "MCP",
               "to": "/api/MCP_INTEGRATION"
-            },
-            {
-              "label": "Mezon Bot",
-              "to": "/integrations/mezon-bot"
             }
           ]
         }

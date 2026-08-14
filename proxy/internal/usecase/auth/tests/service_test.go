@@ -203,6 +203,16 @@ func (m *mockKeys) Revoke(_ context.Context, id int64) error {
 	return domain.ErrNotFound
 }
 
+func (m *mockKeys) UpdateRateLimit(_ context.Context, id int64, rateLimitRPM int) (*domain.ApiKey, error) {
+	for _, k := range m.byHash {
+		if k.ID == id {
+			k.RateLimitRPM = rateLimitRPM
+			return k, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
 type mockRL struct {
 	allowedIDs map[string]bool
 }

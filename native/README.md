@@ -47,11 +47,22 @@ MACOCR_DEFAULT_NODE_ID=ocr-mac-01 \
 ./scripts/build-app.sh
 ```
 
-Runtime mode is not selectable in the UI. Set `MACOCR_MODE=debug` (or `APP_ENV=debug`) when launching a development binary, or set `MACOCR_DEFAULT_MODE=debug` while building an app bundle. Debug mode records additional request/download diagnostics without logging secrets, signed URLs, or file contents. The UI labels the shared value **Connection key (HMAC)**. It must match the proxy's `NATIVE_AUTH_SECRET`; it is not an end-user API key, username, or password. By default, enter it once in the UI and it is stored in Keychain. For controlled internal deployments, `MACOCR_DEFAULT_AUTH_SECRET` can seed the initial bundle value at build time; rotate the proxy secret and rebuild the app if that bundle is distributed beyond the intended worker host.
+Runtime mode is not selectable in the UI; the control panel shows the resolved value (for example `Mode: production`). For a development binary, set `MACOCR_MODE=debug` or `APP_ENV=debug`. For a built app bundle, set `MACOCR_DEFAULT_MODE=debug` at build time. The bundle value is the deployment authority and wins over an ambient `APP_ENV`, so a production bundle never silently flips to development on a host that exports `APP_ENV`; use `MACOCR_MODE` (the native-specific knob) to override a bundle's mode at runtime. Debug mode records additional request/download diagnostics without logging secrets, signed URLs, or file contents. The UI labels the shared value **Connection key (HMAC)**. It must match the proxy's `NATIVE_AUTH_SECRET`; it is not an end-user API key, username, or password. By default, enter it once in the UI and it is stored in Keychain. For controlled internal deployments, `MACOCR_DEFAULT_AUTH_SECRET` can seed the initial bundle value at build time; rotate the proxy secret and rebuild the app if that bundle is distributed beyond the intended worker host.
 
 Adaptive values supplied when `build-app.sh` runs are embedded as node defaults. Runtime environment variables with the same names take precedence, so a differently sized Mac can override capacity policy without rebuilding. The UI concurrency field remains the operator ceiling; live CPU, reclaimable memory, and thermal pressure may safely reduce the effective limit below it.
 
 Logs are visible inside the app and persisted to `~/Library/Logs/MacOCR/native.log`, with one rotated file at 5 MiB. Secrets, presigned URLs, and file contents are not logged.
+
+### Resetting saved settings
+
+The menu-bar app persists the proxy URL, port, and concurrency ceiling in `~/Library/Preferences/com.macocr.native.plist` (UserDefaults) and the connection key in Keychain (service `com.macocr.native`, account `native-auth-secret`). Reinstalling or rebuilding the app does **not** clear these: a previous dev build that saved `http://localhost:8080` keeps showing that URL after a production bundle is installed, because saved values override the bundle defaults on launch. To make a freshly built bundle reseed every field from its build-time defaults, clear the saved state before relaunching:
+
+```bash
+defaults delete com.macocr.native
+security delete-generic-password -a native-auth-secret -s com.macocr.native
+```
+
+After relaunch, the bundle seeds `Proxy URL`, `Mode`, the connection key, and capacity defaults from `Info.plist`.
 
 ## Build & Run from the workspace
 
@@ -80,7 +91,7 @@ swift run
 | `MACOCR_IMAGE_JOB_UNITS` | `1` | Capacity units charged to an image job |
 | `MACOCR_PDF_JOB_UNITS` | `3` | Capacity units charged to a PDF job |
 | `MACOCR_CAPACITY_RECOVERY_SAMPLES` | `5` | Consecutive healthy samples required before capacity increases |
-| `MACOCR_MODE` / `APP_ENV` | `development` | Enables debug diagnostics or strict production secret validation; not editable in the UI |
+| `MACOCR_MODE` / `APP_ENV` | `development` | Runtime mode (`debug`/`development`/`production`). `MACOCR_MODE` always wins and overrides the bundle default. `APP_ENV` is honored only for the development binary; a built bundle's `MacOCRDefaultMode` takes precedence over an ambient `APP_ENV` so a production bundle cannot silently flip to development |
 | `NATIVE_AUTH_SECRET` | `change-me-in-production` | Bearer token for dispatch/config and HMAC key for callback signing; set at least 32 random bytes in production |
 | `NATIVE_NODE_ID` | `ocr-native-01` | Optional build/runtime-only protocol identifier; it is not shown or editable in the UI |
 | `MACOCR_LOG_RETENTION_DAYS` | `30` | Local redacted-log retention, clamped to 1–365 days and embedded by `build-app.sh` |

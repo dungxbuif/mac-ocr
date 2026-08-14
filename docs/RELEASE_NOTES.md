@@ -1,10 +1,22 @@
-# Release Notes — v1.0.0
+# Release Notes — v1.0.1
 
 **Release Date:** August 15, 2026
 
 ---
 
-## 🚀 Overview
+## 🚀 Version 1.0.1 Highlights & Bug Fixes
+
+- **Cluster-Wide Redis Session Management:** Replaced pod-local in-memory session management with central Redis-backed sessions (`ocr:session:<token>`), eliminating multi-pod round-robin authentication dropouts.
+- **Resource Optimization & Fixed Single-Pod Scale:** Scaled deployment down to a fixed single replica (`replicas: 1`), removing unnecessary HPA overhead during normal workload levels.
+- **Clean White Mode Admin UI:** Enhanced dashboard aesthetics with pure, modern White Mode styling, expansive column widths (`1560px` max-width), and generous row padding (`20px 28px`) for effortless navigation.
+- **Admin Self-Deactivation Protection:** Fixed an edge-case bug where an administrator could deactivate their own account, causing accidental lockouts. The Admin UI now hides the deactivate action for the active session, and the backend `/v1/users/:id/deactivate` endpoint strictly rejects self-deactivation.
+- **Admin UI Modernization & TypeScript Migration:** Fully refactored the embedded Admin Control Plane (`/admin/`) from plain JavaScript to TypeScript (`React 18 + TS`) with `lucide-react` icons.
+- **Intuitive QuotaSelector & Password Generator:** Replaced cryptic `0` quota inputs with clear `[ ∞ Unlimited ]` toggle and integrated 16-character cryptographic password generation with clipboard copy support.
+- **Granular API Key Limits Management:** Added dedicated modals for creating API keys with individual Rate Limits (RPM) and viewing/revoking active keys on a per-user basis with instant cache invalidation.
+
+---
+
+## 🚀 Overview (v1.0.0 Base)
 
 High-performance, asynchronous OCR backend platform powered by the macOS Apple Vision OCR Engine. The system connects clients to local or remote macOS OCR workers through a secure Go proxy, S3-compatible object storage, PostgreSQL, and Redis.
 

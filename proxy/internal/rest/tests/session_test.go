@@ -2,11 +2,13 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -15,13 +17,40 @@ import (
 	"macocr/proxy/internal/usecase/auth"
 )
 
+type mockRedisSessionRepo struct {
+	data map[string][]byte
+}
+
+func newMockRedisSessionRepo() *mockRedisSessionRepo {
+	return &mockRedisSessionRepo{data: make(map[string][]byte)}
+}
+
+func (m *mockRedisSessionRepo) SetSession(_ context.Context, token string, data []byte, _ time.Duration) error {
+	m.data[token] = data
+	return nil
+}
+
+func (m *mockRedisSessionRepo) GetSession(_ context.Context, token string) ([]byte, error) {
+	d, ok := m.data[token]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return d, nil
+}
+
+func (m *mockRedisSessionRepo) DeleteSession(_ context.Context, token string) error {
+	delete(m.data, token)
+	return nil
+}
+
 func TestAdminSessionAuth_LoginMeLogout(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 
 	userRepo := newMockUserRepo()
 	cfgRepo := newMockConfigRepo()
-	sm := rest.NewSessionManager()
+	redisRepo := newMockRedisSessionRepo()
+	sm := rest.NewSessionManager(redisRepo)
 
 	hash, _ := auth.HashPassword("AdminPass123!")
 	adminUser := &domain.User{
@@ -127,7 +156,7 @@ func TestAdminSessionAuth_LoginMeLogout(t *testing.T) {
 func TestAdminLoginRejectsOversizedBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := rest.NewAdminAuthHandler(newMockUserRepo(), nil, rest.NewSessionManager(), false)
+	h := rest.NewAdminAuthHandler(newMockUserRepo(), nil, rest.NewSessionManager(nil), false)
 	r.POST("/v1/auth/login", h.Login)
 
 	w := httptest.NewRecorder()
@@ -152,7 +181,7 @@ func TestAdminLoginRateLimitsBeforePasswordVerification(t *testing.T) {
 		t.Fatal(err)
 	}
 	users.users[10] = &domain.User{ID: 10, Email: "admin@test.local", Role: domain.RoleAdmin, PasswordHash: hash}
-	h := rest.NewAdminAuthHandler(users, nil, rest.NewSessionManager(), false)
+	h := rest.NewAdminAuthHandler(users, nil, rest.NewSessionManager(nil), false)
 	r.POST("/v1/auth/login", h.Login)
 
 	body := `{"email":"admin@test.local","password":"wrong password"}`

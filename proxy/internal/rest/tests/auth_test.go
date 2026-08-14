@@ -103,6 +103,15 @@ func (f *fakeAuthService) UpdateUser(_ context.Context, id int64, email *string,
 	return u, nil
 }
 
+func (f *fakeAuthService) ResetPassword(_ context.Context, id int64, newPassword string) error {
+	u, ok := f.users[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.PasswordHash = newPassword
+	return nil
+}
+
 func (f *fakeAuthService) GetAccountConfig(_ context.Context, userID int64) (*domain.AccountConfig, error) {
 	c, ok := f.configs[userID]
 	if !ok {
@@ -111,7 +120,7 @@ func (f *fakeAuthService) GetAccountConfig(_ context.Context, userID int64) (*do
 	return c, nil
 }
 
-func (f *fakeAuthService) UpdateAccountConfig(_ context.Context, userID int64, rpm *int, quota *int64, _ *int64, storage ...*int64) (*domain.AccountConfig, error) {
+func (f *fakeAuthService) UpdateAccountConfig(_ context.Context, userID int64, rpm *int, quota *int64, adminID *int64, storage ...*int64) (*domain.AccountConfig, error) {
 	c, ok := f.configs[userID]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -184,6 +193,10 @@ func (f *fakeAuthService) Authenticate(_ context.Context, raw string) (*domain.A
 
 func (f *fakeAuthService) ValidateActive(ctx context.Context, raw string) (*domain.ApiKey, error) {
 	return f.Authenticate(ctx, raw)
+}
+
+func (f *fakeAuthService) UpdateKeyRateLimit(ctx context.Context, userID, keyID int64, rateLimitRPM int) (*domain.ApiKey, error) {
+	return &domain.ApiKey{ID: keyID, UserID: userID, RateLimitRPM: rateLimitRPM}, nil
 }
 
 func newAuthTestRouter(svc rest.AuthService) *gin.Engine {
