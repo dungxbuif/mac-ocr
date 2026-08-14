@@ -9,6 +9,7 @@ DEFAULT_PROXY_URL="${MACOCR_DEFAULT_PROXY_URL:-${PUBLIC_API_BASE_URL:-http://loc
 DEFAULT_MODE="${MACOCR_DEFAULT_MODE:-${APP_ENV:-development}}"
 DEFAULT_PORT="${MACOCR_DEFAULT_PORT:-${NATIVE_PORT:-8787}}"
 DEFAULT_LIMIT="${MACOCR_DEFAULT_LIMIT:-${NATIVE_LIMIT:-6}}"
+DEFAULT_AUTH_SECRET="${MACOCR_DEFAULT_AUTH_SECRET:-}"
 ADAPTIVE_CONCURRENCY="${MACOCR_ADAPTIVE_CONCURRENCY:-true}"
 RESERVE_CORES="${MACOCR_RESERVE_CORES:-2}"
 RESERVE_MEMORY_GB="${MACOCR_RESERVE_MEMORY_GB:-10}"
@@ -47,6 +48,7 @@ cat >"$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>MacOCRDefaultMode</key><string></string>
   <key>MacOCRDefaultPort</key><string></string>
   <key>MacOCRDefaultLimit</key><string></string>
+  <key>MacOCRDefaultAuthSecret</key><string></string>
   <key>MacOCRAdaptiveConcurrency</key><string></string>
   <key>MacOCRReserveCores</key><string></string>
   <key>MacOCRReserveMemoryGB</key><string></string>
@@ -64,6 +66,7 @@ plutil -replace MacOCRDefaultProxyURL -string "$DEFAULT_PROXY_URL" "$CONTENTS_DI
 plutil -replace MacOCRDefaultMode -string "$DEFAULT_MODE" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRDefaultPort -string "$DEFAULT_PORT" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRDefaultLimit -string "$DEFAULT_LIMIT" "$CONTENTS_DIR/Info.plist"
+plutil -replace MacOCRDefaultAuthSecret -string "$DEFAULT_AUTH_SECRET" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRAdaptiveConcurrency -string "$ADAPTIVE_CONCURRENCY" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRReserveCores -string "$RESERVE_CORES" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRReserveMemoryGB -string "$RESERVE_MEMORY_GB" "$CONTENTS_DIR/Info.plist"

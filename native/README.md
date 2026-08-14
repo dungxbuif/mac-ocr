@@ -47,7 +47,7 @@ MACOCR_DEFAULT_NODE_ID=ocr-mac-01 \
 ./scripts/build-app.sh
 ```
 
-Runtime mode is not selectable in the UI. Set `MACOCR_MODE=debug` (or `APP_ENV=debug`) when launching a development binary, or set `MACOCR_DEFAULT_MODE=debug` while building an app bundle. Debug mode records additional request/download diagnostics without logging secrets, signed URLs, or file contents. The UI labels the shared value **Connection key (HMAC)**. It must match the proxy's `NATIVE_AUTH_SECRET`; it is not an end-user API key, username, or password. The key is deliberately not embedded in the app bundle; enter it once in the UI and it is stored in Keychain.
+Runtime mode is not selectable in the UI. Set `MACOCR_MODE=debug` (or `APP_ENV=debug`) when launching a development binary, or set `MACOCR_DEFAULT_MODE=debug` while building an app bundle. Debug mode records additional request/download diagnostics without logging secrets, signed URLs, or file contents. The UI labels the shared value **Connection key (HMAC)**. It must match the proxy's `NATIVE_AUTH_SECRET`; it is not an end-user API key, username, or password. By default, enter it once in the UI and it is stored in Keychain. For controlled internal deployments, `MACOCR_DEFAULT_AUTH_SECRET` can seed the initial bundle value at build time; rotate the proxy secret and rebuild the app if that bundle is distributed beyond the intended worker host.
 
 Adaptive values supplied when `build-app.sh` runs are embedded as node defaults. Runtime environment variables with the same names take precedence, so a differently sized Mac can override capacity policy without rebuilding. The UI concurrency field remains the operator ceiling; live CPU, reclaimable memory, and thermal pressure may safely reduce the effective limit below it.
 

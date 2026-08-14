@@ -68,7 +68,8 @@ public final class WorkerController: ObservableObject {
         let defaultNode = requestedNode.utf8.count <= 128 && !requestedNode.isEmpty && requestedNode.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" })
             ? requestedNode
             : "ocr-native-01"
-        let defaultSecret = environment["NATIVE_AUTH_SECRET"] ?? "change-me-in-production"
+        let defaultSecret = environment["NATIVE_AUTH_SECRET"]
+            ?? buildDefault("MacOCRDefaultAuthSecret", fallback: "change-me-in-production")
 
         self.proxyURL = defaults.string(forKey: "MacOCRNative.proxyURL") ?? defaultProxy
         self.mode = defaultMode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
