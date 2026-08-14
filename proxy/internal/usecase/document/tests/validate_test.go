@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +160,69 @@ func TestValidateNotification(t *testing.T) {
 	}
 	if _, err := document.ValidateNotification(&domain.NotificationConfig{Type: "webhook", URL: "http://127.0.0.1/callback", Secret: "1234567890123456"}); err == nil {
 		t.Fatal("insecure/private webhook should be rejected")
+	}
+}
+
+func TestValidateOptionsPreservesExplicitFalseBooleans(t *testing.T) {
+	var requested domain.OCROptions
+	if err := json.Unmarshal([]byte(`{"automaticallyDetectsLanguage":false,"usesLanguageCorrection":false}`), &requested); err != nil {
+		t.Fatalf("decode options: %v", err)
+	}
+
+	validated, err := document.ValidateOptions(&requested)
+	if err != nil {
+		t.Fatalf("validate options: %v", err)
+	}
+	if validated.AutomaticallyDetectsLanguage == nil || *validated.AutomaticallyDetectsLanguage {
+		t.Fatal("explicit automaticallyDetectsLanguage=false was not preserved")
+	}
+	if validated.UsesLanguageCorrection == nil || *validated.UsesLanguageCorrection {
+		t.Fatal("explicit usesLanguageCorrection=false was not preserved")
+	}
+
+	encoded, err := json.Marshal(validated)
+	if err != nil {
+		t.Fatalf("encode options: %v", err)
+	}
+	if !bytes.Contains(encoded, []byte(`"automaticallyDetectsLanguage":false`)) || !bytes.Contains(encoded, []byte(`"usesLanguageCorrection":false`)) {
+		t.Fatalf("explicit false options disappeared from worker payload: %s", encoded)
+	}
+}
+
+func TestValidateOptionsAppliesBooleanDefaultsWhenOmitted(t *testing.T) {
+	validated, err := document.ValidateOptions(&domain.OCROptions{})
+	if err != nil {
+		t.Fatalf("validate options: %v", err)
+	}
+	if validated.AutomaticallyDetectsLanguage == nil || !*validated.AutomaticallyDetectsLanguage {
+		t.Fatal("automaticallyDetectsLanguage default should be true")
+	}
+	if validated.UsesLanguageCorrection == nil || !*validated.UsesLanguageCorrection {
+		t.Fatal("usesLanguageCorrection default should be true")
+	}
+	if validated.RecognitionLevel != "accurate" {
+		t.Fatalf("recognitionLevel default should be accurate, got %q", validated.RecognitionLevel)
+	}
+	if !reflect.DeepEqual(validated.Languages, []string{"vi-VN", "en-US"}) {
+		t.Fatalf("languages defaults mismatch: %#v", validated.Languages)
+	}
+}
+
+func TestValidateOptionsPartialObjectKeepsUnspecifiedDefaults(t *testing.T) {
+	validated, err := document.ValidateOptions(&domain.OCROptions{RecognitionLevel: "fast"})
+	if err != nil {
+		t.Fatalf("validate partial options: %v", err)
+	}
+	if validated.RecognitionLevel != "fast" {
+		t.Fatalf("explicit recognitionLevel was not preserved: %q", validated.RecognitionLevel)
+	}
+	if !reflect.DeepEqual(validated.Languages, []string{"vi-VN", "en-US"}) {
+		t.Fatalf("omitted languages did not receive defaults: %#v", validated.Languages)
+	}
+	if validated.AutomaticallyDetectsLanguage == nil || !*validated.AutomaticallyDetectsLanguage {
+		t.Fatal("omitted automaticallyDetectsLanguage should default to true")
+	}
+	if validated.UsesLanguageCorrection == nil || !*validated.UsesLanguageCorrection {
+		t.Fatal("omitted usesLanguageCorrection should default to true")
 	}
 }

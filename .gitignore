@@ -13,6 +13,7 @@ proxy/bin/
 proxy/proxy
 proxy/*.exe
 native/native
+native/dist/
 local-dev/native/native
 *.test
 *.out
@@ -34,3 +35,5 @@ local-dev/s3/package-lock.json
 # Logs
 *.log
 
+# Local OCR evaluation reports
+.ocr-eval/

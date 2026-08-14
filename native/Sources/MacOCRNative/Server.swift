@@ -16,8 +16,9 @@ public actor NativeWorkerState {
     public let bootId: String
     public let authSecret: String
     public let session: URLSession
+    private let logger: NativeLogHandler
 
-    public init(operatorLimit: Int, authSecret: String, nodeId: String) {
+    public init(operatorLimit: Int, authSecret: String, nodeId: String, logger: @escaping NativeLogHandler = { _, _ in }) {
         self.operatorLimit = max(0, operatorLimit)
         self.active = 0
         self.configVersion = 1
@@ -25,6 +26,7 @@ public actor NativeWorkerState {
         self.nodeId = nodeId
         self.bootId = "boot_\(UInt64(Date().timeIntervalSince1970 * 1000))"
         self.authSecret = authSecret
+        self.logger = logger
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
@@ -51,6 +53,7 @@ public actor NativeWorkerState {
     public func updateOperatorLimit(_ newLimit: Int) -> NativeCapacity {
         operatorLimit = max(0, newLimit)
         configVersion += 1
+        logger(.info, "Runtime concurrency limit changed to \(operatorLimit)")
         return getCapacity()
     }
 
@@ -77,6 +80,7 @@ public actor NativeWorkerState {
     public func processOCR(request: NativeOCRRequest) async {
         var processError: Error?
         var ocrResult: OCRResult?
+        logger(.info, "OCR started document=\(request.documentId) attempt=\(request.attemptId)")
 
         do {
             guard let inputURL = URL(string: request.input.url) else {
@@ -102,6 +106,7 @@ public actor NativeWorkerState {
             guard !data.isEmpty else {
                 throw NSError(domain: "NativeWorker", code: 400, userInfo: [NSLocalizedDescriptionKey: "Downloaded input is empty"])
             }
+            logger(.debug, "Input downloaded document=\(request.documentId) bytes=\(data.count) mediaType=\(request.input.mediaType ?? "auto")")
             if let expectedHash = request.input.sha256, !expectedHash.isEmpty {
                 let actualHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                 guard constantTimeEqual(actualHash.lowercased(), expectedHash.lowercased()) else {
@@ -117,8 +122,12 @@ public actor NativeWorkerState {
                 ocrResult = nil
                 throw NSError(domain: "NativeWorker", code: 413, userInfo: [NSLocalizedDescriptionKey: "OCR result exceeds callback payload limit"])
             }
+            if let result = ocrResult {
+                logger(.info, "OCR completed document=\(request.documentId) pages=\(result.pageCount) characters=\(result.text.count)")
+            }
         } catch {
             processError = error
+            logger(.error, "OCR failed document=\(request.documentId) attempt=\(request.attemptId): \(error.localizedDescription)")
         }
 
         let (seq, cap) = releaseSlot()
@@ -146,9 +155,15 @@ public actor NativeWorkerState {
     }
 
     private func deliverCallback(urlStr: String, event: NativeEvent) async {
-        guard let url = URL(string: urlStr) else { return }
+        guard let url = URL(string: urlStr) else {
+            logger(.error, "Callback URL is invalid event=\(event.eventId)")
+            return
+        }
 
-        guard let bodyData = try? JSONEncoder().encode(event) else { return }
+        guard let bodyData = try? JSONEncoder().encode(event) else {
+            logger(.error, "Callback payload encoding failed event=\(event.eventId)")
+            return
+        }
 
         let timestamp = "\(Int64(Date().timeIntervalSince1970))"
         let signature = Signer.sign(
@@ -172,24 +187,36 @@ public actor NativeWorkerState {
             do {
                 let (_, resp) = try await session.data(for: req)
                 if let httpResp = resp as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) {
+                    logger(.info, "Callback delivered event=\(event.eventId) document=\(event.documentId) status=\(httpResp.statusCode) attempt=\(attempt + 1)")
                     return
                 }
             } catch {
+                logger(.warning, "Callback attempt failed event=\(event.eventId) attempt=\(attempt + 1): \(error.localizedDescription)")
             }
 
             try? await Task.sleep(nanoseconds: UInt64((attempt + 1) * 250_000_000))
         }
+        logger(.error, "Callback exhausted retries event=\(event.eventId) document=\(event.documentId)")
     }
+}
+
+public enum NativeServerLifecycle: Sendable {
+    case ready
+    case failed
+    case cancelled
 }
 
 public final class NativeHTTPServer {
     private let port: UInt16
     private let state: NativeWorkerState
+    private let logger: NativeLogHandler
     private var listener: NWListener?
+    public var lifecycleHandler: ((NativeServerLifecycle, String?) -> Void)?
 
-    public init(port: UInt16, state: NativeWorkerState) {
+    public init(port: UInt16, state: NativeWorkerState, logger: @escaping NativeLogHandler = { _, _ in }) {
         self.port = port
         self.state = state
+        self.logger = logger
     }
 
     public func start() throws {
@@ -201,9 +228,14 @@ public final class NativeHTTPServer {
         listener?.stateUpdateHandler = { newState in
             switch newState {
             case .ready:
-                print("Native OCR service listening on port \(self.port)")
+                self.logger(.info, "Native OCR listener ready on port \(self.port)")
+                self.lifecycleHandler?(.ready, nil)
             case .failed(let err):
-                print("Native server failed: \(err)")
+                self.logger(.error, "Native listener failed: \(err.localizedDescription)")
+                self.lifecycleHandler?(.failed, err.localizedDescription)
+            case .cancelled:
+                self.logger(.info, "Native OCR listener stopped")
+                self.lifecycleHandler?(.cancelled, nil)
             default:
                 break
             }
@@ -297,6 +329,9 @@ public final class NativeHTTPServer {
 
         let method = parts[0].uppercased()
         let path = parts[1]
+        if path != "/health" && path != "/capacity" {
+            logger(.debug, "HTTP \(method) \(path)")
+        }
 
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
@@ -324,6 +359,7 @@ public final class NativeHTTPServer {
                     var operatorLimit: Int?
                 }
                 guard authorized(headers: headers, secret: state.authSecret) else {
+                    logger(.warning, "Rejected unauthorized runtime config request")
                     sendResponse(connection: connection, status: 401, body: "{\"error\":\"invalid bearer token\"}")
                     return
                 }
@@ -345,6 +381,7 @@ public final class NativeHTTPServer {
 
             if method == "POST" && path == "/ocr" {
                 guard authorized(headers: headers, secret: state.authSecret) else {
+                    logger(.warning, "Rejected unauthorized OCR request")
                     sendResponse(connection: connection, status: 401, body: "{\"error\":\"invalid bearer token\"}")
                     return
                 }
@@ -360,6 +397,7 @@ public final class NativeHTTPServer {
 
                 let (slotAccepted, cap) = await state.tryAcquireSlot()
                 if !slotAccepted {
+                    logger(.warning, "OCR request rejected because capacity is unavailable document=\(ocrReq.documentId)")
                     let payload = CapacityUnavailableResponse(error: "capacity unavailable", capacity: cap)
                     let json = (try? JSONEncoder().encode(payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                     sendResponse(connection: connection, status: 503, headers: ["Retry-After": "1"], body: json)
@@ -369,6 +407,7 @@ public final class NativeHTTPServer {
                 let response = AcceptedResponse(attemptId: ocrReq.attemptId)
                 let acceptedJSON = (try? JSONEncoder().encode(response)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                 sendResponse(connection: connection, status: 202, body: acceptedJSON)
+                logger(.info, "OCR accepted document=\(ocrReq.documentId) attempt=\(ocrReq.attemptId) active=\(cap.active)")
 
                 Task.detached { [self] in
                     await self.state.processOCR(request: ocrReq)

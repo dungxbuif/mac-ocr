@@ -23,6 +23,7 @@ type Config struct {
 	S3AccessKeyID     string `env:"S3_ACCESS_KEY_ID,required"   validate:"required"`
 	S3SecretAccessKey string `env:"S3_SECRET_ACCESS_KEY,required" validate:"required"`
 	S3ForcePathStyle  bool   `env:"S3_FORCE_PATH_STYLE" envDefault:"true"`
+	MaxUploadBytes    int64  `env:"MAX_UPLOAD_BYTES" envDefault:"104857600" validate:"gt=0"`
 
 	PublicAPIBaseURL  string `env:"PUBLIC_API_BASE_URL,required"  validate:"required,uri"`
 	PublicDocsBaseURL string `env:"PUBLIC_DOCS_BASE_URL,required" validate:"required,uri"`
@@ -32,7 +33,9 @@ type Config struct {
 	NotificationEncryptionKey string        `env:"NOTIFICATION_ENCRYPTION_KEY" envDefault:"local-notification-key-change-me"`
 	ResultTTL                 time.Duration `env:"RESULT_TTL" envDefault:"168h" validate:"gt=0"`
 	InputTTL                  time.Duration `env:"INPUT_TTL" envDefault:"168h" validate:"gt=0"`
-	NotificationTTL           time.Duration `env:"NOTIFICATION_TTL" envDefault:"720h" validate:"gt=0"`
+	UploadTTL                 time.Duration `env:"UPLOAD_TTL" envDefault:"24h" validate:"gt=0"`
+	DocumentTTL               time.Duration `env:"DOCUMENT_TTL" envDefault:"2160h" validate:"gt=0"`
+	NotificationTTL           time.Duration `env:"NOTIFICATION_TTL" envDefault:"2160h" validate:"gt=0"`
 	ProcessingLease           time.Duration `env:"PROCESSING_LEASE" envDefault:"15m" validate:"gt=0"`
 	ProcessingMaxAttempts     int           `env:"PROCESSING_MAX_ATTEMPTS" envDefault:"3" validate:"gte=1,lte=20"`
 
@@ -53,6 +56,9 @@ func Load() (*Config, error) {
 
 	if err := validate.Struct(cfg); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
+	}
+	if cfg.DocumentTTL <= cfg.ResultTTL {
+		return nil, fmt.Errorf("DOCUMENT_TTL must be greater than RESULT_TTL so expired results remain traceable before metadata deletion")
 	}
 	if cfg.Env == "production" {
 		if cfg.NativeBaseURL == "" || cfg.NativeAuthSecret == "" {

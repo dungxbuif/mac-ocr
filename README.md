@@ -5,7 +5,7 @@ OCR Platform is an API-first service for extracting text from images and documen
 ## Highlights
 
 - Asynchronous single-document and batch OCR APIs
-- JSON-only public HTTPS URL and Base64 input methods
+- JSON-only public HTTPS URL, Base64, and presigned large-file upload input methods
 - Language priorities and configurable recognition behavior
 - Durable document resources containing status and completed results
 - API-key authentication, rate limits, and account quotas
@@ -48,9 +48,9 @@ Poll the document URL until it reaches a terminal state, choose webhook/SSE noti
 | `GET` | `/healthz` | Liveness check |
 | `GET` | `/readyz` | Dependency readiness check |
 | `GET` | `/v1/ocr/capabilities` | Recognition options and public limits |
+| `POST` | `/v1/uploads/presign` | Create a size-bound upload URL |
 | `POST` | `/v1/documents` | Submit one document |
 | `GET` | `/v1/documents/{id}` | Read document status and completed result |
-| `DELETE` | `/v1/documents/{id}` | Cancel queued work |
 | `POST` | `/v1/batches` | Submit a batch |
 | `GET` | `/v1/events` | Receive configured SSE notifications |
 | `POST`, `GET` | `/mcp` | MCP Streamable HTTP and task/resource events for agents |
@@ -81,7 +81,7 @@ The local worker downloads every submitted object through its presigned URL befo
 
 ## Documentation
 
-Guides are served at `/`. Interactive Swagger documentation is available at `/api/v1/docs`, and the runtime-generated OpenAPI 3.1 contract is available at `/api/v1/openapi.json`.
+Docusaurus guides are compiled from `docs/` and served at `/`. Interactive Swagger documentation is available at `/api/v1/docs`, and the runtime-generated OpenAPI 3.1 contract is available at `/api/v1/openapi.json`.
 
 ## Security
 

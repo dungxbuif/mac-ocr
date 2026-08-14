@@ -1,0 +1,24 @@
+{
+  "id": "testing/PROD_READINESS_REPORT",
+  "title": "Production Readiness Test Report — 2026-08-15",
+  "description": "Scope",
+  "source": "@site/../docs/testing/PROD_READINESS_REPORT.md",
+  "sourceDirName": "testing",
+  "slug": "/testing/PROD_READINESS_REPORT",
+  "permalink": "/testing/PROD_READINESS_REPORT",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": null,
+  "frontMatter": {},
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Technical Design — Current Implementation",
+    "permalink": "/architecture/TECH_DESIGN"
+  },
+  "next": {
+    "title": "Manual Test Flow",
+    "permalink": "/testing/TEST_FLOW_GUIDE"
+  }
+}

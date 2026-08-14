@@ -42,6 +42,18 @@ func TestLoadValid(t *testing.T) {
 	if cfg.ShutdownTimeout != 10*time.Second {
 		t.Fatalf("unexpected shutdown timeout %v", cfg.ShutdownTimeout)
 	}
+	if cfg.MaxUploadBytes != 104857600 {
+		t.Fatalf("unexpected max upload bytes %d", cfg.MaxUploadBytes)
+	}
+	if cfg.DocumentTTL != 2160*time.Hour {
+		t.Fatalf("unexpected document TTL %v", cfg.DocumentTTL)
+	}
+	if cfg.NotificationTTL != 2160*time.Hour {
+		t.Fatalf("unexpected notification TTL %v", cfg.NotificationTTL)
+	}
+	if cfg.UploadTTL != 24*time.Hour {
+		t.Fatalf("unexpected orphan upload TTL %v", cfg.UploadTTL)
+	}
 }
 
 func TestLoadDefaults(t *testing.T) {
@@ -78,5 +90,16 @@ func TestLoadInvalidURL(t *testing.T) {
 	_, err := config.Load()
 	if err == nil {
 		t.Fatal("expected error for invalid URL")
+	}
+}
+
+func TestLoadRejectsDocumentTTLAtOrBelowResultTTL(t *testing.T) {
+	env := validEnv()
+	env["RESULT_TTL"] = "168h"
+	env["DOCUMENT_TTL"] = "168h"
+	setEnv(t, env)
+	_, err := config.Load()
+	if err == nil {
+		t.Fatal("expected metadata retention to exceed result retention")
 	}
 }

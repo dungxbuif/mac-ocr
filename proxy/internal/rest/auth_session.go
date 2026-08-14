@@ -200,6 +200,8 @@ func (h *AdminAuthHandler) RequireAdminSession() gin.HandlerFunc {
 		}
 
 		c.Set("admin.session", session)
+		c.Set(auditActor, "admin")
+		c.Set(auditUserID, session.UserID)
 		c.Next()
 	}
 }

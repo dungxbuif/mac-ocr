@@ -18,8 +18,8 @@ const (
 type OCROptions struct {
 	RecognitionLevel             string   `json:"recognitionLevel,omitempty"`
 	Languages                    []string `json:"languages,omitempty"`
-	AutomaticallyDetectsLanguage bool     `json:"automaticallyDetectsLanguage,omitempty"`
-	UsesLanguageCorrection       bool     `json:"usesLanguageCorrection,omitempty"`
+	AutomaticallyDetectsLanguage *bool    `json:"automaticallyDetectsLanguage,omitempty"`
+	UsesLanguageCorrection       *bool    `json:"usesLanguageCorrection,omitempty"`
 	CustomWords                  []string `json:"customWords,omitempty"`
 	MinimumTextHeight            float64  `json:"minimumTextHeight,omitempty"`
 }
@@ -111,4 +111,7 @@ type DocumentRepository interface {
 	MarkResultExpired(ctx context.Context, id string) error
 	ListExpiredInputs(ctx context.Context, before time.Time, limit int) ([]Document, error)
 	MarkInputExpired(ctx context.Context, id string) error
+	ListExpiredDocuments(ctx context.Context, before time.Time, limit int) ([]Document, error)
+	DeleteExpiredDocument(ctx context.Context, id string, before time.Time) error
+	IsInputKeyReferenced(ctx context.Context, key string) (bool, error)
 }

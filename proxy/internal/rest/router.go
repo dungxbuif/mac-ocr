@@ -4,13 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"macocr/proxy/admin"
 	"macocr/proxy/docs"
-	"macocr/proxy/domain"
 	"macocr/proxy/internal/rest/middleware"
 )
 
@@ -24,6 +24,7 @@ func NewRouter(
 	auth *AuthHandler,
 	doc *DocumentHandler,
 	batch *BatchHandler,
+	upload *UploadHandler,
 	cap *CapabilitiesHandler,
 	adminAuth *AdminAuthHandler,
 	webhook *WebhookHandler,
@@ -41,6 +42,9 @@ func NewRouter(
 	)
 
 	health.Register(engine.Group("/"))
+	docsHandler := docs.Handler(doc.apiBaseURL, doc.docsBaseURL)
+	engine.GET("/", gin.WrapH(docsHandler))
+	engine.GET("/docs/*filepath", gin.WrapH(http.StripPrefix("/docs", docsHandler)))
 	engine.GET("/api/v1/docs", gin.WrapH(docs.SwaggerHandler(doc.apiBaseURL)))
 	engine.GET("/api/v1/docs/", gin.WrapH(docs.SwaggerHandler(doc.apiBaseURL)))
 	engine.GET("/api/v1/openapi.json", gin.WrapH(OpenAPIHandler()))
@@ -51,6 +55,7 @@ func NewRouter(
 	engine.Any("/admin/*filepath", gin.WrapH(http.StripPrefix("/admin", admin.Handler())))
 
 	engine.POST("/webhooks/native/events", webhook.HandleNativeEvent)
+	engine.POST("/webhooks/native/verify", webhook.HandleNativeVerify)
 	engine.POST("/mcp", auth.RequireAPIKey(), mcp.Post)
 	engine.GET("/mcp", auth.RequireAPIKey(), mcp.Get)
 
@@ -90,17 +95,29 @@ func NewRouter(
 	registerDocRoutes(api.Group("/documents", auth.RequireAPIKey()), doc)
 
 	registerBatchRoutes(api.Group("/batches", auth.RequireAPIKey()), batch)
+	api.POST("/uploads/presign", auth.RequireAPIKey(), upload.Presign)
 
-	engine.NoRoute(gin.WrapH(docs.Handler(doc.apiBaseURL, doc.docsBaseURL)))
+	engine.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if (c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead) ||
+			strings.HasPrefix(path, "/v1") ||
+			strings.HasPrefix(path, "/api/v1") ||
+			strings.HasPrefix(path, "/mcp") ||
+			strings.HasPrefix(path, "/webhooks") ||
+			strings.HasPrefix(path, "/admin") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Status(http.StatusOK)
+		docsHandler.ServeHTTP(c.Writer, c.Request)
+	})
 
 	return &Router{engine: engine}
 }
 
 func registerDocRoutes(g *gin.RouterGroup, h *DocumentHandler) {
 	g.POST("", h.Submit)
-	g.GET("", h.List)
 	g.GET("/:id", h.Get)
-	g.DELETE("/:id", h.Cancel)
 }
 
 func registerBatchRoutes(g *gin.RouterGroup, h *BatchHandler) {
@@ -116,8 +133,4 @@ func (r *Router) ListenAndServe(ctx context.Context, addr string, shutdownTimeou
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return serveGracefully(ctx, srv, shutdownTimeout)
-}
-
-func (h *DocumentHandler) DocumentLinksForStatus(docID string, status domain.DocumentStatus) map[string]gin.H {
-	return h.documentLinks(docID, status)
 }

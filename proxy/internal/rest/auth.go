@@ -14,7 +14,12 @@ import (
 	"macocr/proxy/internal/usecase/auth"
 )
 
-const ctxKey = "auth.apiKey"
+const (
+	ctxKey        = "auth.apiKey"
+	auditUserID   = "audit.user_id"
+	auditAPIKeyID = "audit.api_key_id"
+	auditActor    = "audit.actor"
+)
 
 type AuthService interface {
 	CreateUser(ctx context.Context, email string, role domain.Role, password string, rateLimit *int, docQuota *int64) (*domain.User, error)
@@ -271,6 +276,9 @@ func (h *AuthHandler) RequireAPIKey() gin.HandlerFunc {
 			return
 		}
 		c.Set(ctxKey, k)
+		c.Set(auditActor, "api_key")
+		c.Set(auditUserID, k.UserID)
+		c.Set(auditAPIKeyID, k.ID)
 		c.Next()
 	}
 }

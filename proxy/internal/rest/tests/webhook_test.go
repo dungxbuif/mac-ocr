@@ -81,3 +81,32 @@ func TestWebhookRequiresActiveAttempt(t *testing.T) {
 		t.Fatalf("completed result was not cached: %+v", results.results["doc_1"])
 	}
 }
+
+func TestNativeConnectionVerification(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := rest.NewWebhookHandler(newMockDocRepoAdapter(), newMockObjectRepoFull(), "test-secret", nil, slog.New(slog.NewTextHandler(io.Discard, nil)), nil, &webhookResultCache{results: make(map[string]*domain.OCRResult)}, 24*time.Hour)
+	router := gin.New()
+	router.POST("/webhooks/native/verify", handler.HandleNativeVerify)
+
+	body := []byte(`{"nodeId":"node_1","nonce":"0123456789abcdef"}`)
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	eventID := "verify_0123456789abcdef"
+	request := func(secret string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/native/verify", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Native-Node-Id", "node_1")
+		req.Header.Set("X-Native-Timestamp", ts)
+		req.Header.Set("X-Native-Event-Id", eventID)
+		req.Header.Set("X-Native-Signature", native.SignWebhook(secret, "node_1", ts, eventID, body))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := request("test-secret"); w.Code != http.StatusOK {
+		t.Fatalf("valid native verification failed: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := request("wrong-secret"); w.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong shared key was not rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+}

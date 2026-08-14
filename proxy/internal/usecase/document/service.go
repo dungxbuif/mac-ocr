@@ -24,11 +24,12 @@ type BatchItemInput struct {
 }
 
 type Service struct {
-	docs     domain.DocumentRepository
-	objects  domain.ObjectRepository
-	auth     *auth.Service
-	notifier domain.NotificationPublisher
-	results  domain.ResultCache
+	docs           domain.DocumentRepository
+	objects        domain.ObjectRepository
+	auth           *auth.Service
+	notifier       domain.NotificationPublisher
+	results        domain.ResultCache
+	maxUploadBytes int64
 }
 
 func NewService(
@@ -38,12 +39,27 @@ func NewService(
 	notifier domain.NotificationPublisher,
 	results domain.ResultCache,
 ) *Service {
+	return NewServiceWithMaxUploadBytes(docs, objects, auth, notifier, results, MaxUploadedObjectBytes)
+}
+
+func NewServiceWithMaxUploadBytes(
+	docs domain.DocumentRepository,
+	objects domain.ObjectRepository,
+	auth *auth.Service,
+	notifier domain.NotificationPublisher,
+	results domain.ResultCache,
+	maxUploadBytes int64,
+) *Service {
+	if maxUploadBytes <= 0 {
+		maxUploadBytes = MaxUploadedObjectBytes
+	}
 	return &Service{
-		docs:     docs,
-		objects:  objects,
-		auth:     auth,
-		notifier: notifier,
-		results:  results,
+		docs:           docs,
+		objects:        objects,
+		auth:           auth,
+		notifier:       notifier,
+		results:        results,
+		maxUploadBytes: maxUploadBytes,
 	}
 }
 
@@ -178,43 +194,6 @@ func (s *Service) GetDocumentAdmin(ctx context.Context, docID string) (*domain.D
 	return s.docs.GetByID(ctx, docID)
 }
 
-func (s *Service) Cancel(ctx context.Context, userID int64, docID string) error {
-	doc, err := s.docs.GetByID(ctx, docID)
-	if err != nil {
-		return err
-	}
-	if doc.UserID != userID {
-		return domain.ErrNotFound
-	}
-	if doc.Status == domain.StatusCancelled {
-		if s.notifier != nil {
-			return s.notifier.PublishDocument(ctx, doc)
-		}
-		return nil
-	}
-	if doc.Status != domain.StatusQueued {
-		return fmt.Errorf("%w: document is already %s", domain.ErrConflict, doc.Status)
-	}
-	terminalDoc := *doc
-	terminalDoc.Status = domain.StatusCancelled
-	var event *domain.NotificationEvent
-	if s.notifier != nil {
-		event, err = s.notifier.BuildDocumentEvent(&terminalDoc)
-		if err != nil {
-			return err
-		}
-	}
-	if _, err := s.docs.CancelWithRefund(ctx, docID, userID, event); err != nil {
-		return err
-	}
-	s.auth.InvalidateAccountConfig(ctx, userID)
-	return nil
-}
-
-func (s *Service) ListDocuments(ctx context.Context, userID int64, status domain.DocumentStatus, limit, offset int) ([]domain.Document, error) {
-	return s.docs.ListByUser(ctx, userID, status, limit, offset)
-}
-
 func (s *Service) ListDocumentsAdmin(ctx context.Context, status domain.DocumentStatus, limit, offset int) ([]domain.Document, error) {
 	return s.docs.ListByUser(ctx, 0, status, limit, offset)
 }
@@ -234,7 +213,7 @@ func (s *Service) processInput(ctx context.Context, userID int64, input InputSou
 		if input.URL == "" {
 			return nil, fmt.Errorf("%w: url is empty", domain.ErrBadParamInput)
 		}
-		return ProcessURL(ctx, userID, input.URL, s.objects)
+		return ProcessURLWithUploadLimit(ctx, userID, input.URL, s.objects, s.maxUploadBytes)
 	default:
 		return nil, fmt.Errorf("%w: unsupported input type %q (allowed: base64, url)", domain.ErrBadParamInput, input.Type)
 	}

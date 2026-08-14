@@ -1,8 +1,0 @@
-* [Overview](README.md)
-* [Getting Started](getting-started.md)
-* [Authentication and Limits](authentication.md)
-* [Error Catalog](error-catalog.md)
-* [Notifications](notifications.md)
-* [MCP for Agents](mcp.md)
-* [Swagger API Reference](/api/v1/docs)
-* [Admin Console](/admin/)

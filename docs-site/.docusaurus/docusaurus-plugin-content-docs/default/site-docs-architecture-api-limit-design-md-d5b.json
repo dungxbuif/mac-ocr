@@ -1,0 +1,24 @@
+{
+  "id": "architecture/API_LIMIT_DESIGN",
+  "title": "Authentication, Rate Limits, and Quotas",
+  "description": "API key format",
+  "source": "@site/../docs/architecture/API_LIMIT_DESIGN.md",
+  "sourceDirName": "architecture",
+  "slug": "/architecture/API_LIMIT_DESIGN",
+  "permalink": "/architecture/API_LIMIT_DESIGN",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": 1786712431000,
+  "frontMatter": {},
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "OCR API Reference",
+    "permalink": "/api/API_REFERENCE"
+  },
+  "next": {
+    "title": "Performance Benchmarking Policy",
+    "permalink": "/architecture/BENCHMARK"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "macocr-docs",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "docusaurus start",
+    "build": "docusaurus build --out-dir ../proxy/docs/static"
+  },
+  "devDependencies": {
+    "@docusaurus/core": "latest",
+    "@docusaurus/preset-classic": "latest",
+    "@mdx-js/react": "latest",
+    "clsx": "latest",
+    "prism-react-renderer": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "dependencies": {}
+}

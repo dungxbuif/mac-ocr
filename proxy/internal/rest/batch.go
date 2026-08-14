@@ -86,9 +86,10 @@ func (h *BatchHandler) Submit(c *gin.Context) {
 			"index":      i,
 			"documentId": d.ID,
 			"status":     d.Status,
-			"_links": gin.H{
-				"document": gin.H{"href": fmt.Sprintf("%s/v1/documents/%s", h.apiBaseURL, d.ID)},
-			},
+			"links": []errs.Link{{
+				Rel:  "self",
+				Href: fmt.Sprintf("%s/v1/documents/%s", h.apiBaseURL, d.ID),
+			}},
 		}
 	}
 
@@ -102,8 +103,5 @@ func (h *BatchHandler) Submit(c *gin.Context) {
 			"rejected": 0,
 		},
 		"items": docItems,
-		"_links": gin.H{
-			"docs": gin.H{"href": fmt.Sprintf("%s/#/getting-started", h.docsBaseURL)},
-		},
 	})
 }

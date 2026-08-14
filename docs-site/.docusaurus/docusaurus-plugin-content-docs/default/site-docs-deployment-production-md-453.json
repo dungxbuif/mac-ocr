@@ -1,0 +1,28 @@
+{
+  "id": "deployment/production",
+  "title": "Production deployment",
+  "description": "This is a release checklist, not a provider-specific infrastructure template. The OCR worker requires macOS; deploy the Go proxy and its stateful dependencies according to your platform, then provide routable private connectivity to the native worker.",
+  "source": "@site/../docs/deployment/production.md",
+  "sourceDirName": "deployment",
+  "slug": "/deployment/production",
+  "permalink": "/deployment/production",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": null,
+  "sidebarPosition": 1,
+  "frontMatter": {
+    "title": "Production deployment",
+    "sidebar_position": 1
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Manual Test Flow",
+    "permalink": "/testing/TEST_FLOW_GUIDE"
+  },
+  "next": {
+    "title": "Implementation Status",
+    "permalink": "/planning/IMPLEMENTATION_PLAN"
+  }
+}

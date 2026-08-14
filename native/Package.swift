@@ -13,6 +13,11 @@ let package = Package(
         .executableTarget(
             name: "MacOCRNative",
             path: "Sources/MacOCRNative"
+        ),
+        .testTarget(
+            name: "MacOCRNativeTests",
+            dependencies: ["MacOCRNative"],
+            path: "Tests/MacOCRNativeTests"
         )
     ]
 )

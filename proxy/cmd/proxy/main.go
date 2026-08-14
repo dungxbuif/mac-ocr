@@ -84,9 +84,9 @@ func main() {
 	docRepo := pgrepo.NewDocumentRepository(pgRepo.Pool(), secretCipher)
 	notificationRepo := pgrepo.NewNotificationRepository(pgRepo.Pool(), secretCipher)
 	notificationSvc := notifications.NewService(notificationRepo, cfg.PublicAPIBaseURL, logger)
-	docSvc := document.NewService(docRepo, objRepo, authSvc, notificationSvc, redisRepo)
+	docSvc := document.NewServiceWithMaxUploadBytes(docRepo, objRepo, authSvc, notificationSvc, redisRepo, cfg.MaxUploadBytes)
 	go notificationSvc.Run(ctx)
-	go retention.New(docRepo, notificationRepo, objRepo, logger, cfg.InputTTL, cfg.NotificationTTL).Run(ctx)
+	go retention.New(docRepo, notificationRepo, objRepo, logger, cfg.InputTTL, cfg.UploadTTL, cfg.DocumentTTL, cfg.NotificationTTL).Run(ctx)
 
 	nativeClient := native.NewClient(cfg.NativeBaseURL, cfg.NativeAuthSecret)
 	callbackURL := fmt.Sprintf("%s/webhooks/native/events", cfg.PublicAPIBaseURL)
@@ -101,6 +101,7 @@ func main() {
 	authHandler := rest.NewAuthHandler(authSvc)
 	docHandler := rest.NewDocumentHandler(docSvc, cfg.PublicAPIBaseURL, cfg.PublicDocsBaseURL)
 	batchHandler := rest.NewBatchHandler(docSvc, cfg.PublicAPIBaseURL, cfg.PublicDocsBaseURL)
+	uploadHandler := rest.NewUploadHandler(objRepo, cfg.MaxUploadBytes)
 	capHandler := rest.NewCapabilitiesHandler()
 	webhookHandler := rest.NewWebhookHandler(docRepo, objRepo, cfg.NativeAuthSecret, sched, logger, notificationSvc, redisRepo, cfg.ResultTTL)
 	notificationHandler := rest.NewNotificationHandler(notificationSvc)
@@ -112,6 +113,7 @@ func main() {
 		authHandler,
 		docHandler,
 		batchHandler,
+		uploadHandler,
 		capHandler,
 		adminAuthHandler,
 		webhookHandler,

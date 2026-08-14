@@ -1,0 +1,13 @@
+export default {
+  "11dcfbd9": [() => import(/* webpackChunkName: "11dcfbd9" */ "@site/../docs/swagger.md"), "@site/../docs/swagger.md", require.resolveWeak("@site/../docs/swagger.md")],
+  "17896441": [() => import(/* webpackChunkName: "17896441" */ "@theme/DocItem"), "@theme/DocItem", require.resolveWeak("@theme/DocItem")],
+  "22dd74f7": [() => import(/* webpackChunkName: "22dd74f7" */ "@generated/docusaurus-plugin-content-docs/default/p/index-466.json"), "@generated/docusaurus-plugin-content-docs/default/p/index-466.json", require.resolveWeak("@generated/docusaurus-plugin-content-docs/default/p/index-466.json")],
+  "296b32b4": [() => import(/* webpackChunkName: "296b32b4" */ "@site/../docs/api/OCR_RESPONSE.md"), "@site/../docs/api/OCR_RESPONSE.md", require.resolveWeak("@site/../docs/api/OCR_RESPONSE.md")],
+  "3907c39f": [() => import(/* webpackChunkName: "3907c39f" */ "@site/../docs/guides/onboarding.md"), "@site/../docs/guides/onboarding.md", require.resolveWeak("@site/../docs/guides/onboarding.md")],
+  "5e95c892": [() => import(/* webpackChunkName: "5e95c892" */ "@theme/DocsRoot"), "@theme/DocsRoot", require.resolveWeak("@theme/DocsRoot")],
+  "608d6ba6": [() => import(/* webpackChunkName: "608d6ba6" */ "@site/../docs/README.md"), "@site/../docs/README.md", require.resolveWeak("@site/../docs/README.md")],
+  "6109d1bb": [() => import(/* webpackChunkName: "6109d1bb" */ "@site/../docs/api/API_REFERENCE.md"), "@site/../docs/api/API_REFERENCE.md", require.resolveWeak("@site/../docs/api/API_REFERENCE.md")],
+  "6b035ca0": [() => import(/* webpackChunkName: "6b035ca0" */ "@site/../docs/api/MCP_INTEGRATION.md"), "@site/../docs/api/MCP_INTEGRATION.md", require.resolveWeak("@site/../docs/api/MCP_INTEGRATION.md")],
+  "a7bd4aaa": [() => import(/* webpackChunkName: "a7bd4aaa" */ "@theme/DocVersionRoot"), "@theme/DocVersionRoot", require.resolveWeak("@theme/DocVersionRoot")],
+  "a94703ab": [() => import(/* webpackChunkName: "a94703ab" */ "@theme/DocRoot"), "@theme/DocRoot", require.resolveWeak("@theme/DocRoot")],
+  "aba21aa0": [() => import(/* webpackChunkName: "aba21aa0" */ "@generated/docusaurus-plugin-content-docs/default/__plugin.json"), "@generated/docusaurus-plugin-content-docs/default/__plugin.json", require.resolveWeak("@generated/docusaurus-plugin-content-docs/default/__plugin.json")],};

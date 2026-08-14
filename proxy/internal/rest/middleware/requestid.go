@@ -3,11 +3,14 @@ package middleware
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"regexp"
 
 	"github.com/gin-gonic/gin"
 )
 
 const requestIDKey = "request_id"
+
+var safeRequestID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 func RequestIDFrom(c *gin.Context) string {
 	if v, ok := c.Get(requestIDKey); ok {
@@ -21,7 +24,7 @@ func RequestIDFrom(c *gin.Context) string {
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.GetHeader("X-Request-Id")
-		if id == "" {
+		if !safeRequestID.MatchString(id) {
 			id = newRequestID()
 		}
 		c.Set(requestIDKey, id)

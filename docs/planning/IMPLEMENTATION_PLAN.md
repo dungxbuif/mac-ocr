@@ -26,7 +26,7 @@ This file tracks the repository as implemented. Future ideas belong in `TICKETS.
 - Direct-array batch input with 1–100 items.
 - Shared single/batch document preparation logic.
 - Server-generated document identifiers; batch submission creates no batch identifier or persistence record.
-- One document resource for status, completed result, expiration, list, and cancellation.
+- One exact document resource for status, completed result, and expiration; public listing and cancellation are intentionally absent.
 - Batch submission returning independent document IDs without a public batch resource.
 - Capabilities endpoint and absolute response links.
 - RFC 9457-style problem responses with stable error codes.
@@ -55,8 +55,8 @@ This file tracks the repository as implemented. Future ideas belong in `TICKETS.
 - Per-document webhook or SSE configuration shared by single and batch submissions.
 - AES-GCM encryption for webhook secrets, durable outbox rows, signed delivery, and retry.
 - Authenticated SSE with event cursor and heartbeat.
-- Result TTL served directly from Redis, `410 RESULT_EXPIRED`, periodic PostgreSQL payload cleanup, and best-effort S3 cleanup with a retained tombstone.
-- MCP `2025-11-25` Streamable HTTP tools, resources, tasks, cancellation, and task/resource events.
+- Result TTL served directly from Redis, `410 RESULT_EXPIRED`, periodic payload/object cleanup, and terminal PostgreSQL row deletion after `DOCUMENT_TTL`.
+- MCP `2025-11-25` Streamable HTTP submit/read tools, exact resources, task reads, and task/resource events without list/cancel operations.
 
 ### Developer experience
 

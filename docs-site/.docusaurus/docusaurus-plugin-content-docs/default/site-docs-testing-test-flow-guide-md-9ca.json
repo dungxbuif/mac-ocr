@@ -1,0 +1,24 @@
+{
+  "id": "testing/TEST_FLOW_GUIDE",
+  "title": "Manual Test Flow",
+  "description": "This guide matches the current API contract.",
+  "source": "@site/../docs/testing/TEST_FLOW_GUIDE.md",
+  "sourceDirName": "testing",
+  "slug": "/testing/TEST_FLOW_GUIDE",
+  "permalink": "/testing/TEST_FLOW_GUIDE",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": 1786712431000,
+  "frontMatter": {},
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Production Readiness Test Report — 2026-08-15",
+    "permalink": "/testing/PROD_READINESS_REPORT"
+  },
+  "next": {
+    "title": "Production deployment",
+    "permalink": "/deployment/production"
+  }
+}

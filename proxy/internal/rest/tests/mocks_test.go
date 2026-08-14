@@ -3,7 +3,10 @@ package tests
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	"macocr/proxy/domain"
@@ -175,6 +178,34 @@ func (m *mockObjectRepoFull) PresignGetURL(ctx context.Context, key string, ttl 
 	return "http://mock-s3/" + key, nil
 }
 
+func (m *mockObjectRepoFull) PresignPutURL(ctx context.Context, key, contentType string, contentLength int64, ttl time.Duration) (string, http.Header, error) {
+	return "http://mock-s3/" + key + "?put=1", http.Header{"Content-Type": []string{contentType}}, nil
+}
+
+func (m *mockObjectRepoFull) SourceURLForKey(key string) string {
+	return "s3://macocr-inputs/" + key
+}
+
+func (m *mockObjectRepoFull) KeyFromOwnURL(rawURL string, userID int64) (string, bool, error) {
+	prefix := "s3://macocr-inputs/"
+	if !strings.HasPrefix(rawURL, prefix) {
+		return "", false, nil
+	}
+	key := strings.TrimPrefix(rawURL, prefix)
+	if !strings.HasPrefix(key, fmt.Sprintf("uploads/%d/", userID)) {
+		return "", true, domain.ErrNotFound
+	}
+	return key, true, nil
+}
+
+func (m *mockObjectRepoFull) Stat(ctx context.Context, key string) (*domain.ObjectInfo, error) {
+	b, ok := m.stored[key]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return &domain.ObjectInfo{Key: key, SizeBytes: int64(len(b))}, nil
+}
+
 func (m *mockObjectRepoFull) Ping(ctx context.Context) error {
 	return nil
 }
@@ -185,8 +216,9 @@ func (m *mockObjectRepoFull) Delete(_ context.Context, key string) error {
 }
 
 type mockDocRepoAdapter struct {
-	docs   map[string]*domain.Document
-	byUser map[int64][]*domain.Document
+	docs    map[string]*domain.Document
+	byUser  map[int64][]*domain.Document
+	configs *mockConfigRepoFull
 }
 
 func newMockDocRepoAdapter() *mockDocRepoAdapter {
@@ -205,10 +237,28 @@ func (m *mockDocRepoAdapter) Create(ctx context.Context, doc *domain.Document) (
 	return &d, nil
 }
 func (m *mockDocRepoAdapter) CreateWithQuota(ctx context.Context, doc *domain.Document) (*domain.Document, error) {
-	return m.Create(ctx, doc)
+	if m.configs != nil {
+		if err := m.configs.ReserveDocs(ctx, doc.UserID, 1); err != nil {
+			return nil, err
+		}
+	}
+	created, err := m.Create(ctx, doc)
+	if err != nil && m.configs != nil {
+		_ = m.configs.RefundDocs(ctx, doc.UserID, 1)
+	}
+	return created, err
 }
-func (m *mockDocRepoAdapter) CreateManyWithQuota(ctx context.Context, _ int64, docs []domain.Document) ([]domain.Document, error) {
-	return m.CreateMany(ctx, docs)
+func (m *mockDocRepoAdapter) CreateManyWithQuota(ctx context.Context, userID int64, docs []domain.Document) ([]domain.Document, error) {
+	if m.configs != nil {
+		if err := m.configs.ReserveDocs(ctx, userID, int64(len(docs))); err != nil {
+			return nil, err
+		}
+	}
+	created, err := m.CreateMany(ctx, docs)
+	if err != nil && m.configs != nil {
+		_ = m.configs.RefundDocs(ctx, userID, int64(len(docs)))
+	}
+	return created, err
 }
 func (m *mockDocRepoAdapter) CreateMany(ctx context.Context, docs []domain.Document) ([]domain.Document, error) {
 	created := make([]domain.Document, 0, len(docs))
@@ -292,3 +342,17 @@ func (m *mockDocRepoAdapter) ListExpiredInputs(context.Context, time.Time, int) 
 	return nil, nil
 }
 func (m *mockDocRepoAdapter) MarkInputExpired(context.Context, string) error { return nil }
+func (m *mockDocRepoAdapter) ListExpiredDocuments(context.Context, time.Time, int) ([]domain.Document, error) {
+	return nil, nil
+}
+func (m *mockDocRepoAdapter) DeleteExpiredDocument(context.Context, string, time.Time) error {
+	return nil
+}
+func (m *mockDocRepoAdapter) IsInputKeyReferenced(_ context.Context, key string) (bool, error) {
+	for _, doc := range m.docs {
+		if doc.InputKey == key {
+			return true, nil
+		}
+	}
+	return false, nil
+}

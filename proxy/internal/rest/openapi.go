@@ -35,11 +35,13 @@ func buildOpenAPISpec() gin.H {
 		"info": gin.H{
 			"title":       "OCR Platform API",
 			"version":     "1.0.0",
-			"description": "Asynchronous OCR API for applications and AI agents. Submit a public HTTPS URL or strict Base64 content; retrieve each document independently.",
+			"description": "Asynchronous OCR API for applications and AI agents. The native macOS worker maps Apple Vision text observations to pages, blocks, confidence values, and normalized bounding boxes. Submit a public HTTPS URL, app-owned S3 source URL, or strict Base64 content; retrieve each document independently.",
 		},
-		"servers": []gin.H{{"url": "/", "description": "Current server"}},
+		"externalDocs": gin.H{"description": "OCR result and Apple Vision field mapping", "url": "/api/OCR_RESPONSE"},
+		"servers":      []gin.H{{"url": "/", "description": "Current server"}},
 		"tags": []gin.H{
 			{"name": "Documents", "description": "Submit and retrieve independent OCR documents."},
+			{"name": "Uploads", "description": "Create authenticated presigned upload URLs for large inputs."},
 			{"name": "Notifications", "description": "Receive durable terminal document events."},
 			{"name": "MCP", "description": "Model Context Protocol endpoint for agents."},
 			{"name": "System"},
@@ -58,16 +60,12 @@ func buildOpenAPISpec() gin.H {
 					"413": problemResponse("HTTP envelope or URL content exceeds its safety limit", problem),
 					"415": problemResponse("Only application/json and supported document bytes are accepted", problem),
 				})),
-				"get": secured(operation("List documents", "Documents", documentListParameters(), gin.H{"200": jsonResponse("Documents", refSchema("DocumentList")), "401": problemResponse("Invalid or missing API key", problem)})),
 			},
 			"/v1/documents/{documentId}": gin.H{
 				"get": secured(operation("Get document status and result", "Documents", []gin.H{documentIDParameter()}, gin.H{
 					"200": jsonResponse("Current state; completed documents include result until expiry", document),
 					"304": gin.H{"description": "Not modified"}, "401": problemResponse("Invalid or missing API key", problem),
 					"404": problemResponse("Document not found", problem), "410": problemResponse("OCR result has expired", problem),
-				})),
-				"delete": secured(operation("Cancel a queued document", "Documents", []gin.H{documentIDParameter()}, gin.H{
-					"204": gin.H{"description": "Cancelled"}, "404": problemResponse("Document not found", problem), "409": problemResponse("Document is no longer queued", problem),
 				})),
 			},
 			"/v1/batches": gin.H{"post": secured(operationWithBody("Submit 1-100 independent documents", "Documents", gin.H{
@@ -76,6 +74,13 @@ func buildOpenAPISpec() gin.H {
 				"202": jsonResponse("Every item accepted as an independent document", refSchema("BatchReceipt")),
 				"400": problemResponse("The complete batch is rejected if any item is invalid", problem),
 				"401": problemResponse("Invalid or missing API key", problem), "413": problemResponse("Batch JSON envelope exceeds 128 MiB", problem),
+				"415": problemResponse("Only application/json is accepted", problem),
+			}))},
+			"/v1/uploads/presign": gin.H{"post": secured(operationWithBody("Create a presigned upload URL", "Uploads", refSchema("PresignUploadRequest"), gin.H{
+				"201": jsonResponse("Presigned upload URL and source URL", refSchema("PresignUploadResponse")),
+				"400": problemResponse("Invalid filename or size", problem),
+				"401": problemResponse("Invalid or missing API key", problem),
+				"413": problemResponse("Requested upload size exceeds the configured file limit", problem),
 				"415": problemResponse("Only application/json is accepted", problem),
 			}))},
 			"/v1/events": gin.H{"get": secured(operation("Stream SSE document events", "Notifications", []gin.H{{
@@ -93,8 +98,11 @@ func buildOpenAPISpec() gin.H {
 			},
 		},
 		"components": gin.H{
-			"securitySchemes": gin.H{"bearerAuth": gin.H{"type": "http", "scheme": "bearer", "bearerFormat": "sk_ocr_..."}},
-			"schemas":         openAPISchemas(),
+			"securitySchemes": gin.H{"apiKeyAuth": gin.H{
+				"type": "apiKey", "in": "header", "name": "Authorization",
+				"description": "API key in the form: Bearer sk_ocr_...",
+			}},
+			"schemas": openAPISchemas(),
 		},
 		"x-mcp-protocol-version": mcpProtocolVersion,
 		"x-mcp-tools":            mcpTools(),
@@ -117,20 +125,32 @@ func openAPISchemas() gin.H {
 			"input": refSchema("Input"), "options": refSchema("OCROptions"), "notification": refSchema("Notification"),
 		}},
 		"SubmissionReceipt": gin.H{"type": "object", "required": []string{"documentId", "status", "createdAt"}, "properties": gin.H{
-			"documentId": gin.H{"type": "string", "examples": []string{"doc_..."}}, "status": gin.H{"const": "queued"}, "createdAt": gin.H{"type": "string", "format": "date-time"}, "_links": linksSchema(),
+			"documentId": gin.H{"type": "string", "examples": []string{"doc_..."}}, "status": gin.H{"const": "queued"}, "createdAt": gin.H{"type": "string", "format": "date-time"}, "links": linksSchema(),
 		}},
 		"BatchReceipt": gin.H{"type": "object", "required": []string{"status", "summary", "items"}, "properties": gin.H{
 			"status": gin.H{"const": "accepted"}, "summary": gin.H{"type": "object", "properties": gin.H{"total": integerSchema(), "accepted": integerSchema(), "rejected": integerSchema()}},
-			"items":  gin.H{"type": "array", "items": gin.H{"type": "object", "required": []string{"index", "documentId", "status"}, "properties": gin.H{"index": integerSchema(), "documentId": gin.H{"type": "string"}, "status": gin.H{"const": "queued"}, "_links": linksSchema()}}},
-			"_links": linksSchema(),
+			"items": gin.H{"type": "array", "items": gin.H{"type": "object", "required": []string{"index", "documentId", "status"}, "properties": gin.H{"index": integerSchema(), "documentId": gin.H{"type": "string"}, "status": gin.H{"const": "queued"}, "links": linksSchema()}}},
+		}},
+		"PresignUploadRequest": gin.H{"type": "object", "additionalProperties": false, "required": []string{"filename", "sizeBytes"}, "properties": gin.H{
+			"filename":    gin.H{"type": "string", "minLength": 1, "maxLength": 255},
+			"sizeBytes":   gin.H{"type": "integer", "format": "int64", "minimum": 1, "description": "Declared upload size. The object is checked again with storage metadata at OCR submission time."},
+			"contentType": gin.H{"type": "string", "description": "Optional upload Content-Type header to bind into the presigned PUT request."},
+		}},
+		"PresignUploadResponse": gin.H{"type": "object", "required": []string{"uploadUrl", "sourceUrl", "method", "expiresAt", "maxUploadBytes", "sizeBytes", "headers"}, "properties": gin.H{
+			"uploadUrl":      gin.H{"type": "string", "format": "uri", "description": "Temporary URL for one PUT upload to object storage."},
+			"sourceUrl":      gin.H{"type": "string", "description": "App-owned S3 source URL to pass as input.url in /v1/documents, /v1/batches, or MCP tools."},
+			"method":         gin.H{"const": "PUT"},
+			"expiresAt":      gin.H{"type": "string", "format": "date-time"},
+			"maxUploadBytes": gin.H{"type": "integer", "format": "int64", "description": "Maximum accepted object size for this deployment."},
+			"sizeBytes":      gin.H{"type": "integer", "format": "int64", "description": "Exact Content-Length bound into this presigned request."},
+			"headers":        gin.H{"type": "object", "additionalProperties": gin.H{"type": "string"}, "description": "Headers the client must copy to the PUT request, including the signed Content-Length and optional Content-Type."},
 		}},
 		"Document": gin.H{"type": "object", "required": []string{"documentId", "status", "createdAt", "updatedAt"}, "properties": gin.H{
-			"documentId": gin.H{"type": "string"}, "status": statusSchema(), "inputContentType": gin.H{"type": "string"}, "inputSizeBytes": gin.H{"type": "integer", "format": "int64"},
+			"documentId": gin.H{"type": "string"}, "status": statusSchema(), "inputContentType": gin.H{"type": "string", "description": "Media type detected from file bytes, not trusted from the filename or request header."}, "inputSizeBytes": gin.H{"type": "integer", "format": "int64"},
 			"createdAt": gin.H{"type": "string", "format": "date-time"}, "updatedAt": gin.H{"type": "string", "format": "date-time"},
-			"result": refSchema("OCRResult"), "resultExpiresAt": gin.H{"type": []string{"string", "null"}, "format": "date-time"},
-			"resultExpired": gin.H{"type": "boolean"}, "errorDetail": gin.H{"type": "string"}, "_links": linksSchema(),
+			"result": refSchema("OCRResult"), "resultExpiresAt": gin.H{"type": []string{"string", "null"}, "format": "date-time", "description": "Redis result expiration. Persist required output before this time."},
+			"resultExpired": gin.H{"type": "boolean"}, "errorDetail": gin.H{"type": "string"}, "links": linksSchema(),
 		}},
-		"DocumentList": gin.H{"type": "object", "properties": gin.H{"documents": gin.H{"type": "array", "items": refSchema("Document")}, "limit": integerSchema(), "offset": integerSchema()}},
 		"Capabilities": gin.H{
 			"type": "object",
 			"required": []string{
@@ -159,15 +179,23 @@ func openAPISchemas() gin.H {
 				},
 			},
 		},
+		"OCRBlock": gin.H{"type": "object", "required": []string{"text", "confidence"}, "description": "One Apple Vision recognized-text observation using only its highest-ranked candidate.", "properties": gin.H{
+			"text":       gin.H{"type": "string", "description": "String from topCandidates(1).first."},
+			"confidence": gin.H{"type": "number", "minimum": 0, "maximum": 1, "description": "Apple Vision normalized confidence for the selected candidate; 1 is highest. Do not assume it is a calibrated probability."},
+			"bbox":       gin.H{"type": "array", "minItems": 4, "maxItems": 4, "items": gin.H{"type": "number"}, "description": "Normalized [x, y, width, height] in Apple Vision coordinates, whose origin is the lower-left of the page/image."},
+		}},
+		"OCRPage": gin.H{"type": "object", "required": []string{"pageNumber", "text"}, "properties": gin.H{
+			"pageNumber": gin.H{"type": "integer", "minimum": 1, "description": "One-based source page number."},
+			"text":       gin.H{"type": "string", "description": "Top candidate strings joined with newline characters in Apple Vision observation order."},
+			"blocks":     gin.H{"type": "array", "items": refSchema("OCRBlock"), "description": "Recognized observations; blocks are not guaranteed to be words, paragraphs, table cells, or semantic lines."},
+		}},
 		"OCRResult": gin.H{"type": "object", "required": []string{"text", "pageCount"}, "properties": gin.H{
-			"text": gin.H{"type": "string"}, "pageCount": gin.H{"type": "integer", "minimum": 0},
-			"pages": gin.H{"type": "array", "items": gin.H{"type": "object", "properties": gin.H{
-				"pageNumber": gin.H{"type": "integer", "minimum": 1}, "text": gin.H{"type": "string"},
-				"blocks": gin.H{"type": "array", "items": gin.H{"type": "object", "properties": gin.H{"text": gin.H{"type": "string"}, "confidence": gin.H{"type": "number", "minimum": 0, "maximum": 1}, "bbox": gin.H{"type": "array", "items": gin.H{"type": "number"}}}}},
-			}}},
+			"text":      gin.H{"type": "string", "description": "Whole-document plain text. Non-empty PDF page texts are joined with two newlines, --- PAGE BREAK ---, and two newlines."},
+			"pageCount": gin.H{"type": "integer", "minimum": 0, "description": "Source PDF page count; supported standalone images have one page."},
+			"pages":     gin.H{"type": "array", "items": refSchema("OCRPage"), "description": "Page-level output in source-page order. Consumers should tolerate omission for stored results without page details."},
 		}},
 		"Problem": gin.H{"type": "object", "required": []string{"type", "title", "status", "code"}, "properties": gin.H{
-			"type": gin.H{"type": "string", "format": "uri-reference"}, "title": gin.H{"type": "string"}, "status": gin.H{"type": "integer"}, "code": gin.H{"type": "string"}, "detail": gin.H{"type": "string"}, "requestId": gin.H{"type": "string"}, "limits": gin.H{"type": "object"},
+			"type": gin.H{"type": "string", "format": "uri-reference"}, "title": gin.H{"type": "string"}, "status": gin.H{"type": "integer"}, "code": gin.H{"type": "string"}, "detail": gin.H{"type": "string"}, "requestId": gin.H{"type": "string"}, "limits": gin.H{"type": "object"}, "links": linksSchema(),
 		}},
 		"MCPRequest":  gin.H{"type": "object", "required": []string{"jsonrpc", "method"}, "properties": gin.H{"jsonrpc": gin.H{"const": "2.0"}, "id": gin.H{}, "method": gin.H{"type": "string"}, "params": gin.H{"type": "object"}}},
 		"MCPResponse": gin.H{"type": "object", "required": []string{"jsonrpc"}, "properties": gin.H{"jsonrpc": gin.H{"const": "2.0"}, "id": gin.H{}, "result": gin.H{}, "error": gin.H{"type": "object"}}},
@@ -193,7 +221,7 @@ func operationWithBodyMedia(summary, tag, mediaType string, schema gin.H, respon
 }
 
 func secured(op gin.H) gin.H {
-	op["security"] = []gin.H{{"bearerAuth": []string{}}}
+	op["security"] = []gin.H{{"apiKeyAuth": []string{}}}
 	return op
 }
 
@@ -215,15 +243,19 @@ func statusSchema() gin.H {
 	return gin.H{"type": "string", "enum": []string{"queued", "processing", "completed", "failed", "cancelled"}}
 }
 func linksSchema() gin.H {
-	return gin.H{"type": "object", "additionalProperties": gin.H{"type": "object", "properties": gin.H{"href": gin.H{"type": "string", "format": "uri-reference"}, "method": gin.H{"type": "string"}}}}
+	return gin.H{
+		"type": "array",
+		"items": gin.H{
+			"type":     "object",
+			"required": []string{"rel", "href"},
+			"properties": gin.H{
+				"rel":    gin.H{"type": "string"},
+				"href":   gin.H{"type": "string", "format": "uri-reference"},
+				"method": gin.H{"type": "string"},
+			},
+		},
+	}
 }
 func documentIDParameter() gin.H {
 	return gin.H{"name": "documentId", "in": "path", "required": true, "schema": gin.H{"type": "string"}}
-}
-func documentListParameters() []gin.H {
-	return []gin.H{
-		{"name": "status", "in": "query", "schema": statusSchema()},
-		{"name": "limit", "in": "query", "schema": gin.H{"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
-		{"name": "offset", "in": "query", "schema": gin.H{"type": "integer", "minimum": 0, "default": 0}},
-	}
 }

@@ -1,0 +1,28 @@
+{
+  "id": "api/MCP_INTEGRATION",
+  "title": "MCP integration",
+  "description": "The authenticated /mcp endpoint exposes the same validation, quota, native OCR worker, response model, and result TTL as REST. MCP adds JSON-RPC envelopes, durable task IDs, exact document resources, and task/resource notifications; it does not create a second OCR result format.",
+  "source": "@site/../docs/api/MCP_INTEGRATION.md",
+  "sourceDirName": "api",
+  "slug": "/api/MCP_INTEGRATION",
+  "permalink": "/api/MCP_INTEGRATION",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": null,
+  "sidebarPosition": 3,
+  "frontMatter": {
+    "title": "MCP integration",
+    "sidebar_position": 3
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "OCR response model",
+    "permalink": "/api/OCR_RESPONSE"
+  },
+  "next": {
+    "title": "OCR API Reference",
+    "permalink": "/api/API_REFERENCE"
+  }
+}

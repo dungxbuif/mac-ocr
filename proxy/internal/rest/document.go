@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -99,7 +98,7 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 		"documentId": doc.ID,
 		"status":     doc.Status,
 		"createdAt":  doc.CreatedAt,
-		"_links":     h.documentLinks(doc.ID, doc.Status),
+		"links":      h.documentLinks(doc.ID),
 	})
 }
 
@@ -124,8 +123,12 @@ func respondRequestTooLarge(c *gin.Context, err error, maxBytes int64) bool {
 	if !errors.As(err, &maxErr) {
 		return false
 	}
-	RespondProblem(c, errs.New(errs.CodePayloadTooLarge, http.StatusRequestEntityTooLarge, "Request body is too large").
-		WithDetail("The complete HTTP request exceeds the allowed size.").WithLimit("maxRequestBytes", maxBytes))
+	problem := errs.New(errs.CodePayloadTooLarge, http.StatusRequestEntityTooLarge, "Request body is too large").
+		WithDetail("The complete HTTP request exceeds the allowed size.").WithLimit("maxRequestBytes", maxBytes)
+	if strings.HasPrefix(c.FullPath(), "/v1/") {
+		problem = withUploadRecoveryLinks(problem)
+	}
+	RespondProblem(c, problem)
 	return true
 }
 
@@ -161,82 +164,11 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, h.documentResponse(doc))
 }
 
-func (h *DocumentHandler) Cancel(c *gin.Context) {
-	k, ok := apiKeyFrom(c)
-	if !ok {
-		RespondProblem(c, errs.Unauthorized("authentication required"))
-		return
-	}
-
-	docID := c.Param("id")
-	if !documentIDPattern.MatchString(docID) {
-		RespondProblem(c, errs.InvalidInput("document id format is invalid"))
-		return
-	}
-	if err := h.svc.Cancel(c.Request.Context(), k.UserID, docID); err != nil {
-		if errors.Is(err, domain.ErrConflict) {
-			RespondProblem(c, errs.New(errs.CodeStateConflict, http.StatusConflict, "Document cannot be cancelled").WithDetail(err.Error()))
-			return
-		}
-		RespondError(c, err)
-		return
-	}
-
-	c.Status(http.StatusNoContent)
-}
-
-func (h *DocumentHandler) List(c *gin.Context) {
-	k, ok := apiKeyFrom(c)
-	if !ok {
-		RespondProblem(c, errs.Unauthorized("authentication required"))
-		return
-	}
-
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	if err != nil || limit < 1 || limit > 100 {
-		RespondProblem(c, errs.InvalidInput("limit must be an integer from 1 through 100"))
-		return
-	}
-	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	if err != nil || offset < 0 {
-		RespondProblem(c, errs.InvalidInput("offset must be a non-negative integer"))
-		return
-	}
-	status := domain.DocumentStatus(c.Query("status"))
-	if status != "" && status != domain.StatusQueued && status != domain.StatusProcessing && status != domain.StatusCompleted && status != domain.StatusFailed && status != domain.StatusCancelled {
-		RespondProblem(c, errs.InvalidInput("status must be queued, processing, completed, failed, or cancelled"))
-		return
-	}
-
-	docs, err := h.svc.ListDocuments(c.Request.Context(), k.UserID, status, limit, offset)
-	if err != nil {
-		RespondError(c, err)
-		return
-	}
-
-	items := make([]gin.H, len(docs))
-	for i := range docs {
-		items[i] = h.documentResponse(&docs[i])
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"documents": items,
-		"limit":     limit,
-		"offset":    offset,
-	})
-}
-
-func (h *DocumentHandler) documentLinks(docID string, status domain.DocumentStatus) map[string]gin.H {
-	links := map[string]gin.H{
-		"self": {"href": fmt.Sprintf("%s/v1/documents/%s", h.apiBaseURL, docID)},
-		"docs": {"href": fmt.Sprintf("%s/#/getting-started", h.docsBaseURL)},
-	}
-	if status == domain.StatusQueued {
-		links["cancel"] = gin.H{
-			"href":   fmt.Sprintf("%s/v1/documents/%s", h.apiBaseURL, docID),
-			"method": "DELETE",
-		}
-	}
-	return links
+func (h *DocumentHandler) documentLinks(docID string) []errs.Link {
+	return []errs.Link{{
+		Rel:  "self",
+		Href: fmt.Sprintf("%s/v1/documents/%s", h.apiBaseURL, docID),
+	}}
 }
 
 func (h *DocumentHandler) documentResponse(doc *domain.Document) gin.H {
@@ -247,7 +179,7 @@ func (h *DocumentHandler) documentResponse(doc *domain.Document) gin.H {
 		"inputSizeBytes":   doc.InputSizeBytes,
 		"createdAt":        doc.CreatedAt,
 		"updatedAt":        doc.UpdatedAt,
-		"_links":           h.documentLinks(doc.ID, doc.Status),
+		"links":            h.documentLinks(doc.ID),
 	}
 	if doc.Status == domain.StatusCompleted && doc.ResultExpiresAt != nil && !time.Now().Before(*doc.ResultExpiresAt) {
 		res["resultExpired"] = true

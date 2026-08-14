@@ -31,8 +31,10 @@ proxy/internal/repository/s3/       S3-compatible object adapter
 proxy/internal/scheduler/           durable queue polling and dispatch
 proxy/internal/native/              worker HTTP client and webhook signatures
 proxy/internal/notifications/       secret encryption, outbox publishing, webhook delivery
-proxy/internal/retention/           expired result cleanup
-proxy/docs/static/                   embedded guides and Swagger UI shell
+proxy/internal/retention/           input/result/event/document cleanup
+proxy/admin-ui/                      React admin source
+docs-site/                           Docusaurus build configuration
+proxy/docs/static/                   generated embedded Docusaurus site
 local-dev/s3/                       s3rver-based local object storage
 local-dev/native/                   one-file local OCR worker simulator
 local-dev/start.js                  one-command local service launcher
@@ -40,19 +42,24 @@ local-dev/start.js                  one-command local service launcher
 
 ## Submission flow
 
-Single and batch submissions share `prepareQueuedDocument`:
+Single, batch, and MCP submissions share `prepareQueuedDocument`:
 
 1. Validate recognition options.
 2. Infer the source from the HTTP representation.
 3. Strictly decode Base64 or fetch public HTTPS input under bounded limits.
-4. Detect the actual media type from magic bytes.
-5. Perform structural and security validation.
-6. Store the normalized input in object storage.
-7. Build a server-generated queued document.
+4. If `input.url` is an app-owned `s3://` upload URL, resolve it to the authenticated user's object key, `HEAD` it, enforce `MAX_UPLOAD_BYTES`, stream the object, then run the same content sniffing and file validation.
+5. Detect the actual media type from magic bytes.
+6. Perform structural and security validation.
+7. Store or reference the normalized input in object storage.
+8. Build a server-generated queued document.
 
 Single submission invokes this flow once, reserves one quota unit, and inserts one document. If quota or persistence fails, the newly stored input is deleted best-effort.
 
 Batch submission invokes the same flow in array order, reserves quota for the array length, and inserts all independent documents through `CreateMany` in one PostgreSQL transaction. A validation or persistence failure deletes already prepared input objects best-effort. No batch row, batch foreign key, batch counter, batch queue, or public batch resource exists.
+
+## Presigned upload flow
+
+`POST /v1/uploads/presign` is authenticated by API key and creates an object key under `uploads/{userId}/`. The response includes a temporary `PUT uploadUrl` and a stable `sourceUrl` such as `s3://bucket/uploads/{userId}/...`. The service rejects presign requests whose declared `sizeBytes` exceeds `MAX_UPLOAD_BYTES`, but does not trust that declaration as authoritative. During OCR submission it resolves only app-owned source URLs, verifies the user-owned key prefix, checks object metadata, streams the object under the same byte ceiling, detects the real media type from magic bytes, and validates the complete file structure before reserving document quota.
 
 ## JSON contract
 
@@ -119,7 +126,7 @@ Document rows contain an optional notification channel. Webhook secrets are AES-
 
 SSE reads account-scoped outbox rows by ordered event ID and supports `Last-Event-ID`. MCP uses the same SSE events to emit `notifications/tasks/status` and `notifications/resources/updated`; MCP document tasks map directly to server-generated document IDs.
 
-Result JSON receives the configured `RESULT_TTL`. `GetDocument` checks ownership and lifecycle in PostgreSQL, then reads completed payloads directly from Redis. Expired or missing result keys return `410`. Every minute the retention worker clears expired PostgreSQL payload fields even if best-effort S3 deletion fails, preserving the document tombstone.
+Result JSON receives the configured `RESULT_TTL`. `GetDocument` checks ownership and lifecycle in PostgreSQL, then reads completed payloads directly from Redis. Expired or missing result keys return `410` while metadata exists. Every minute the retention worker clears expired payload fields, removes object copies best-effort, deletes unreferenced presigned uploads after `UPLOAD_TTL`, and deletes terminal document metadata after `DOCUMENT_TTL`; subsequent reads return `404`. Before orphan deletion, PostgreSQL is queried by `input_key` so active or retained documents keep their source object.
 
 ## Local development
 

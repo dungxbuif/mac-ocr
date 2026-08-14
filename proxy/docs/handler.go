@@ -56,6 +56,9 @@ func (dfs *dynamicFS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fullPath := "static/" + filepath.Clean(path)
 
 	content, cType, err := dfs.readFile(fullPath)
+	if err != nil && !strings.Contains(path, ".") {
+		content, cType, err = dfs.readFile(strings.TrimSuffix(fullPath, "/") + "/index.html")
+	}
 	if err != nil {
 		if strings.HasSuffix(path, ".md") || !strings.Contains(path, ".") {
 			fullPath = "static/index.html"

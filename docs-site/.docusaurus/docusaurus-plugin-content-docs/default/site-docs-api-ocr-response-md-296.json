@@ -1,0 +1,28 @@
+{
+  "id": "api/OCR_RESPONSE",
+  "title": "OCR response model",
+  "description": "This page defines how to consume a completed OCR result. The native macOS worker uses Apple's Vision text-recognition request and converts its observations into a stable, engine-neutral JSON model. The mapping is intentionally small so clients do not need Apple frameworks.",
+  "source": "@site/../docs/api/OCR_RESPONSE.md",
+  "sourceDirName": "api",
+  "slug": "/api/OCR_RESPONSE",
+  "permalink": "/api/OCR_RESPONSE",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": null,
+  "sidebarPosition": 2,
+  "frontMatter": {
+    "title": "OCR response model",
+    "sidebar_position": 2
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "OCR API quickstart",
+    "permalink": "/guides/onboarding"
+  },
+  "next": {
+    "title": "MCP integration",
+    "permalink": "/api/MCP_INTEGRATION"
+  }
+}

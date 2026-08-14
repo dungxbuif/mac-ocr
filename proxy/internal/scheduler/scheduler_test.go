@@ -83,6 +83,15 @@ func (r *schedulerDocRepo) ListExpiredInputs(context.Context, time.Time, int) ([
 	return nil, nil
 }
 func (r *schedulerDocRepo) MarkInputExpired(context.Context, string) error { return nil }
+func (r *schedulerDocRepo) ListExpiredDocuments(context.Context, time.Time, int) ([]domain.Document, error) {
+	return nil, nil
+}
+func (r *schedulerDocRepo) DeleteExpiredDocument(context.Context, string, time.Time) error {
+	return nil
+}
+func (r *schedulerDocRepo) IsInputKeyReferenced(_ context.Context, key string) (bool, error) {
+	return r.doc != nil && r.doc.InputKey == key, nil
+}
 
 type schedulerObjects struct{ url string }
 

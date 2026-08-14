@@ -41,25 +41,29 @@ public enum VisionEngine {
         var fullTextParts: [String] = []
 
         for pageIndex in 0..<pageCount {
-            guard let page = pdfDocument.page(at: pageIndex) else { continue }
+            guard let page = pdfDocument.page(at: pageIndex) else {
+                throw NSError(domain: "VisionEngine", code: 422, userInfo: [NSLocalizedDescriptionKey: "Failed to read PDF page \(pageIndex + 1)"])
+            }
             let pageRect = page.bounds(for: .mediaBox)
             let scale: CGFloat = 2.0
             let targetSize = CGSize(width: pageRect.width * scale, height: pageRect.height * scale)
 
             let image = NSImage(size: targetSize)
             image.lockFocus()
-            if let context = NSGraphicsContext.current?.cgContext {
-                context.setFillColor(NSColor.white.cgColor)
-                context.fill(CGRect(origin: .zero, size: targetSize))
-                context.scaleBy(x: scale, y: scale)
-                page.draw(with: .mediaBox, to: context)
+            guard let context = NSGraphicsContext.current?.cgContext else {
+                image.unlockFocus()
+                throw NSError(domain: "VisionEngine", code: 422, userInfo: [NSLocalizedDescriptionKey: "Failed to create render context for PDF page \(pageIndex + 1)"])
             }
+            context.setFillColor(NSColor.white.cgColor)
+            context.fill(CGRect(origin: .zero, size: targetSize))
+            context.scaleBy(x: scale, y: scale)
+            page.draw(with: .mediaBox, to: context)
             image.unlockFocus()
 
             guard let tiffData = image.tiffRepresentation,
                   let bitmap = NSBitmapImageRep(data: tiffData),
                   let cgImage = bitmap.cgImage else {
-                continue
+                throw NSError(domain: "VisionEngine", code: 422, userInfo: [NSLocalizedDescriptionKey: "Failed to render PDF page \(pageIndex + 1)"])
             }
 
             let pageResult = try recognizeCGImage(cgImage: cgImage, pageNumber: pageIndex + 1, options: options)

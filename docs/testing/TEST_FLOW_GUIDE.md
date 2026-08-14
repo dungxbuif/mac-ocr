@@ -58,7 +58,7 @@ Verify account deactivation and reactivation before continuing:
 
 ```bash
 go run ./cmd/admin disable-user --user-id 2
-curl -i -H "Authorization: Bearer $OCR_API_KEY" "$OCR_API_URL/v1/documents"
+curl -i -H "Authorization: Bearer $OCR_API_KEY" "$OCR_API_URL/v1/documents/doc_known_id"
 go run ./cmd/admin enable-user --user-id 2
 ```
 
@@ -98,7 +98,29 @@ curl -i -X POST "$OCR_API_URL/v1/documents" \
   -d "{\"input\":{\"base64\":\"$BASE64_DATA\"}}"
 ```
 
-Expected: `202` for a supported valid file up to 25 MiB decoded, with `documentId`, `status: queued`, `Location`, `Retry-After`, and `_links`.
+Expected: `202` for a supported valid file up to 25 MiB decoded, with `documentId`, `status: queued`, `Location`, `Retry-After`, and a HATEOAS `links` array containing `rel=self`.
+
+## 6a. Upload a large file through a presigned URL
+
+```bash
+FILE=sample.pdf
+SIZE=$(wc -c < "$FILE" | tr -d ' ')
+PRESIGN=$(curl -sS -X POST "$OCR_API_URL/v1/uploads/presign" \
+  -H "Authorization: Bearer $OCR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"filename\":\"sample.pdf\",\"sizeBytes\":$SIZE,\"contentType\":\"application/pdf\"}")
+
+UPLOAD_URL=$(echo "$PRESIGN" | jq -r .uploadUrl)
+SOURCE_URL=$(echo "$PRESIGN" | jq -r .sourceUrl)
+curl -fsS -X PUT "$UPLOAD_URL" -H "Content-Type: application/pdf" --data-binary "@$FILE"
+
+curl -i -X POST "$OCR_API_URL/v1/documents" \
+  -H "Authorization: Bearer $OCR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"input\":{\"url\":\"$SOURCE_URL\"}}"
+```
+
+Expected: presign rejects `sizeBytes` above `maxUploadBytes`; submit rejects missing, cross-account, zero-byte, oversized, malformed, or unsupported uploaded objects before quota reservation.
 
 ## 7. Submit a direct-array batch
 
@@ -168,6 +190,13 @@ Expected: `400 SSRF_BLOCKED`.
 
 Submitting Base64 or URL content containing HTML, SVG, JavaScript, or renamed text returns `415 UNSUPPORTED_MEDIA_TYPE`. Active or encrypted PDF content returns `400 FILE_VALIDATION_FAILED`.
 
+### Presigned upload edge cases
+
+- Requesting a presign with `sizeBytes > maxUploadBytes` returns `413 URL_CONTENT_TOO_LARGE`.
+- Submitting a returned `sourceUrl` before upload completes returns an input error and does not queue a document.
+- Editing the `sourceUrl` to another bucket or another user's `uploads/{userId}/` prefix is rejected.
+- Uploading more bytes than declared is still caught at submit time by object metadata and streaming validation.
+
 ### Unknown property
 
 ```json
@@ -188,7 +217,7 @@ Expected: `400 INVALID_INPUT` because every request body must contain exactly on
 
 Submit one document with `"notification":{"type":"sse"}`, then connect to `GET /v1/events` with the same Bearer key. A terminal event should arrive with an `id`; reconnecting with `Last-Event-ID` resumes after that event. For webhooks, verify `X-OCR-Signature` against `timestamp.eventId.rawBody` using the configured secret.
 
-On completion, verify `GET /v1/documents/{id}` returns the structured Redis-backed result and `resultExpiresAt`. With a short test `RESULT_TTL`, the same read must return `410 RESULT_EXPIRED` after expiry, and the periodic worker must clear PostgreSQL `result_text`/`result_key` while leaving the document row.
+On completion, verify `GET /v1/documents/{id}` returns the structured Redis-backed result and `resultExpiresAt`. With a short test `RESULT_TTL`, the same read must return `410 RESULT_EXPIRED` after expiry. With a short `DOCUMENT_TTL`, the retention worker must later delete the terminal document row and the same read must return `404 NOT_FOUND`.
 
 For MCP, initialize at `POST /mcp`, call `tools/list`, submit with `submit_ocr_document`, and keep authenticated `GET /mcp` open. Verify task-status and resource-updated messages use the returned document ID.
 

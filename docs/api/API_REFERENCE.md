@@ -4,7 +4,7 @@ The OCR API is asynchronous. Submission endpoints return `202 Accepted` and dura
 
 Interactive Swagger UI is served at `/api/v1/docs`. The OpenAPI 3.1 contract is generated from runtime Go schemas and served at `/api/v1/openapi.json`; there is no separately maintained YAML contract.
 
-Only `application/json` submissions are supported. Single-document envelopes are capped at 36 MiB; batch and MCP envelopes are capped at 128 MiB. Exceeding an envelope cap returns `413 PAYLOAD_TOO_LARGE`. Base64 is limited to 25 MiB decoded per item and returns `400 BASE64_TOO_LARGE`; URL downloads have a 100 MiB resource-safety ceiling and return `413 URL_CONTENT_TOO_LARGE`.
+Only `application/json` submissions are supported. Single-document envelopes are capped at 36 MiB; batch and MCP envelopes are capped at 128 MiB. Exceeding an envelope cap returns `413 PAYLOAD_TOO_LARGE`. Base64 is limited to 25 MiB decoded per item and returns `400 BASE64_TOO_LARGE`; URL downloads and app-owned presigned-upload objects have a 100 MiB default resource-safety ceiling and return `413 URL_CONTENT_TOO_LARGE`.
 
 ## Authentication
 
@@ -28,7 +28,7 @@ The Swagger contract describes the public OCR and MCP data plane. Administrator 
 
 The client does not send a file type. The service determines content type from magic bytes and accepts JPEG, PNG, TIFF, WebP, and PDF.
 
-JSON submissions contain exactly one source:
+JSON submissions contain exactly one source. `url` may be either a public HTTPS URL or an app-owned `s3://...` `sourceUrl` returned by the presigned upload endpoint:
 
 ```json
 {"input":{"url":"https://files.example.com/invoice.png"}}
@@ -38,11 +38,94 @@ JSON submissions contain exactly one source:
 {"input":{"base64":"iVBORw0KGgo..."}}
 ```
 
+```json
+{"input":{"url":"s3://macocr-inputs/uploads/123/20260814T130000.000_abcd_invoice.pdf"}}
+```
+
 Unknown JSON fields are rejected. A JSON input containing both `url` and `base64`, or neither, returns `400 INVALID_SOURCE`.
+
+## Large file upload through presigned URLs
+
+### `POST /v1/uploads/presign`
+
+Use this route when a file is too large or inefficient for Base64. The route requires the same Bearer API key as OCR submission.
+
+Request:
+
+```json
+{
+  "filename": "invoice.pdf",
+  "sizeBytes": 73400320,
+  "contentType": "application/pdf"
+}
+```
+
+Response:
+
+```json
+{
+  "method": "PUT",
+  "uploadUrl": "https://storage.example.com/...",
+  "sourceUrl": "s3://macocr-inputs/uploads/123/...",
+  "headers": {
+    "Content-Length": "73400320",
+    "Content-Type": "application/pdf"
+  },
+  "sizeBytes": 73400320,
+  "maxUploadBytes": 104857600,
+  "expiresAt": "2026-08-14T14:15:00Z"
+}
+```
+
+`POST /v1/uploads/presign` does not receive the file bytes. Upload the exact file directly to `uploadUrl` with the returned `PUT` method and every returned header, then submit OCR with `{"input":{"url":"<sourceUrl>"}}`. Do not send the OCR API key to `uploadUrl`; its temporary authorization is already encoded in the signed URL. `uploadUrl` is the external upload destination, while `sourceUrl` is the app-owned internal reference accepted by OCR submission.
+
+The presigned SigV4 request binds the declared size as `Content-Length`; a production-equivalent S3 service must reject a different length. The service also accepts only `sourceUrl` values whose bucket and key prefix belong to the authenticated user, checks object metadata, and streams the uploaded bytes during OCR submission under the same hard ceiling. A client therefore cannot bypass the limit by declaring a small `sizeBytes` and later submitting a larger object. Quota is reserved only after the uploaded object is present, size-checked, content-sniffed, and structurally validated.
+
+### Upload size failures
+
+| Failure point | HTTP response | Machine code/body |
+|---|---:|---|
+| Presign `sizeBytes` exceeds `MAX_UPLOAD_BYTES` | `413` from OCR Platform | `URL_CONTENT_TOO_LARGE`, with `limits.maxUploadBytes` |
+| Presigned PUT uses a different length or signed header | Usually `403` from object storage | Provider-specific S3 XML; not `application/problem+json` |
+| Submitted app-owned object is actually over the server limit | `413` from OCR Platform | `URL_CONTENT_TOO_LARGE` |
+| Decoded Base64 exceeds 25 MiB | `400` from OCR Platform | `BASE64_TOO_LARGE`, with `limits.maxDecodedBytes` |
+| Complete JSON envelope exceeds its route limit | `413` from OCR Platform | `PAYLOAD_TOO_LARGE`, with `limits.maxRequestBytes` |
+
+Oversized presign example:
+
+```http
+HTTP/1.1 413 Request Entity Too Large
+Content-Type: application/problem+json
+```
+
+```json
+{
+  "type": "about:blank",
+  "code": "URL_CONTENT_TOO_LARGE",
+  "status": 413,
+  "title": "Upload file is too large",
+  "detail": "sizeBytes exceeds the configured upload limit",
+  "limits": {"maxUploadBytes": 104857600},
+  "links": [
+    {"rel": "presign", "href": "/v1/uploads/presign", "method": "POST"},
+    {"rel": "capabilities", "href": "/v1/ocr/capabilities", "method": "GET"}
+  ]
+}
+```
+
+The example limit is the default. Follow `rel=capabilities` to discover deployment limits and `rel=presign` to retry after reducing or splitting the file. Clients should read `limits.maxUploadBytes` because a deployment may use another value. A rejected presign does not reserve document quota and does not create an upload URL.
 
 ## Single document
 
 ### `POST /v1/documents`
+
+Only `input` is required. It must contain exactly one source. This is a complete minimal request:
+
+```json
+{"input":{"url":"https://files.example.com/invoice.png"}}
+```
+
+The equivalent presigned-upload request is `{"input":{"url":"<sourceUrl returned by presign>"}}`. `options` and `notification` are optional. Omitting `options`, sending `options: {}`, or sending only selected option fields applies defaults to every unspecified field: accurate recognition, `vi-VN` and `en-US`, automatic language detection, language correction, no custom words, and minimum text height `0`.
 
 URL or Base64 input:
 
@@ -67,9 +150,9 @@ Response:
   "documentId": "doc_18f673199c0",
   "status": "queued",
   "createdAt": "2026-08-14T13:40:00Z",
-  "_links": {
-    "self": {"href": "https://ocr.example.com/v1/documents/doc_18f673199c0"}
-  }
+  "links": [
+    {"rel": "self", "href": "https://ocr.example.com/v1/documents/doc_18f673199c0"}
+  ]
 }
 ```
 
@@ -77,13 +160,9 @@ Response:
 
 Returns `queued`, `processing`, `completed`, `failed`, or `cancelled`. Pending resources include `Retry-After`. A completed document includes the full cached `result` in this same response; no `/result` endpoint exists. Conditional reads support `If-None-Match`.
 
-### `DELETE /v1/documents/{documentId}`
+There is no public list, delete, or cancel operation. Clients must retain the returned `documentId` and read that exact resource. Unknown or expired document IDs return `404`; a completed document whose Redis result expired while its metadata is still retained returns `410`.
 
-Cancels a queued document. Processing or terminal documents return `409 STATE_CONFLICT`.
-
-### `GET /v1/documents`
-
-Lists documents owned by the authenticated account. Supported query parameters are `status`, `limit`, and `offset`.
+For the complete result payload, Apple Vision field provenance, confidence semantics, bounding-box coordinates, PDF page joining, and client examples, see [OCR response model](OCR_RESPONSE.md).
 
 ## Batch documents
 
@@ -143,13 +222,15 @@ For SSE use `"notification":{"type":"sse"}` and connect to `GET /v1/events` with
 
 ## Result retention
 
-Completed document responses include `resultExpiresAt`. The default `RESULT_TTL` is 168 hours. The callback writes the full result to Redis with this TTL, and document reads obtain the payload directly from Redis. A cache miss or elapsed TTL returns `410 RESULT_EXPIRED`. Every minute, retention clears expired result payload fields from PostgreSQL and best-effort removes the object copy while retaining lifecycle metadata.
+Completed document responses include `resultExpiresAt`. The default `RESULT_TTL` is 168 hours. The callback writes the full result to Redis with this TTL, and document reads obtain the payload directly from Redis. A cache miss or elapsed TTL returns `410 RESULT_EXPIRED` while metadata remains. Every minute, retention clears expired result/input payload fields, removes unreferenced presigned uploads after `UPLOAD_TTL` (default 24 hours), and deletes terminal PostgreSQL document rows after `DOCUMENT_TTL` (default 2160 hours, or 90 days). Delivered notification audit events use the same 90-day default. Reads return `404 NOT_FOUND` after metadata deletion.
 
 ## MCP for agents
 
-`/mcp` implements authenticated MCP Streamable HTTP using protocol revision `2025-11-25`. It exposes `submit_ocr_document`, `submit_ocr_batch`, `get_ocr_document`, and `cancel_ocr_document`, plus `ocr://documents/{documentId}` resources. A submitted document is an MCP task; agents use `tasks/get`, `tasks/list`, `tasks/result`, or `tasks/cancel`. `GET /mcp` emits durable `notifications/tasks/status` and `notifications/resources/updated` events for terminal tasks and supports `Last-Event-ID`. MCP submission automatically selects its event channel and otherwise reuses the same URL/Base64 validation and document queue as REST.
+`/mcp` implements authenticated MCP Streamable HTTP using protocol revision `2025-11-25`. It exposes `submit_ocr_document`, `submit_ocr_batch`, and `get_ocr_document`, plus `ocr://documents/{documentId}` resources. A submitted document is an MCP task; agents may read one known task with `tasks/get` or `tasks/result`. Task listing and cancellation are not exposed. `GET /mcp` emits durable `notifications/tasks/status` and `notifications/resources/updated` events for terminal tasks and supports `Last-Event-ID`. MCP submission automatically selects its event channel and otherwise reuses the same URL/Base64 validation and document queue as REST.
 
 MCP POST requests require `application/json`, enforce the same 128 MiB envelope cap and strict unknown-field validation as REST, and validate task/document IDs before repository access. Expected input errors are returned as JSON-RPC errors; internal storage and implementation errors are not exposed to agent clients.
+
+See [MCP integration](MCP_INTEGRATION.md) for exact JSON-RPC envelopes, tool/task/resource response differences, event resume behavior, errors, and retention rules.
 
 ## Recognition options
 
@@ -165,12 +246,13 @@ MCP POST requests require `application/json`, enforce the same 128 MiB envelope 
 ## Validation and security
 
 - Public submissions accept JSON URL or Base64 sources only; multipart and raw object routes are not registered.
+- Large uploads use `POST /v1/uploads/presign`, direct `PUT` to object storage, then a normal JSON OCR submission with the returned app-owned `sourceUrl`.
 - Base64 is limited to 25 MiB decoded per item; URL downloads have a 100 MiB safety ceiling.
 - Base64 uses strict standard alphabet and padding validation before decoding.
 - File type is determined from magic bytes, not filename or client headers.
 - PNG and JPEG structure and pixel counts are validated.
 - Truncated and active/encrypted PDF content is rejected.
-- Remote input requires HTTPS and blocks credentials, private, loopback, link-local, multicast, unspecified, and metadata addresses.
+- Remote input requires HTTPS and blocks credentials, private, loopback, link-local, multicast, unspecified, and metadata addresses. App-owned `s3://` source URLs are resolved internally by bucket/key ownership instead of through public HTTP fetch.
 - DNS results are checked again and pinned when opening the upstream connection to mitigate rebinding.
 - Unknown JSON properties are rejected.
 
@@ -198,5 +280,6 @@ Important codes include `INVALID_SOURCE`, `INVALID_BASE64`, `BASE64_TOO_LARGE`, 
 | `GET` | `/healthz` | Process liveness |
 | `GET` | `/readyz` | PostgreSQL, Redis, and object-storage readiness |
 | `GET` | `/v1/ocr/capabilities` | Public options, languages, and limits |
+| `POST` | `/v1/uploads/presign` | Create authenticated presigned upload URLs for large files |
 | `GET` | `/api/v1/docs` | Swagger UI |
 | `GET` | `/api/v1/openapi.json` | Runtime-generated OpenAPI contract, including `x-mcp-tools` |

@@ -30,9 +30,11 @@ func RespondError(c *gin.Context, err error) {
 		p = errs.New(errs.CodeBase64TooLarge, http.StatusBadRequest, "Base64 input is too large").
 			WithDetail(err.Error()+". Upload the file to your own storage and submit its HTTPS URL, or remove this item from the batch.").
 			WithLimit("maxDecodedBytes", 25*1024*1024)
+		p = withUploadRecoveryLinks(p)
 	case errors.Is(err, domain.ErrURLContentTooLarge):
 		p = errs.New(errs.CodeURLContentTooLarge, http.StatusRequestEntityTooLarge, "URL content is too large").
 			WithDetail(err.Error())
+		p = withUploadRecoveryLinks(p)
 	case errors.Is(err, domain.ErrUnsupportedMediaType):
 		p = errs.New(errs.CodeUnsupportedMediaType, http.StatusUnsupportedMediaType, "Unsupported file type").WithDetail(err.Error())
 	case errors.Is(err, domain.ErrFileValidation):
@@ -59,6 +61,12 @@ func RespondError(c *gin.Context, err error) {
 		p = errs.Internal("an unexpected error occurred")
 	}
 	RespondProblem(c, p)
+}
+
+func withUploadRecoveryLinks(p *errs.Problem) *errs.Problem {
+	return p.
+		WithLink("presign", "/v1/uploads/presign", http.MethodPost).
+		WithLink("capabilities", "/v1/ocr/capabilities", http.MethodGet)
 }
 
 func RespondProblem(c *gin.Context, p *errs.Problem) {

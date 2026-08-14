@@ -60,11 +60,12 @@ type Problem struct {
 	Title  string            `json:"title"`
 	Detail string            `json:"detail,omitempty"`
 	Limits map[string]any    `json:"limits,omitempty"`
-	Links  map[string]Link   `json:"_links,omitempty"`
+	Links  []Link            `json:"links,omitempty"`
 	Fields map[string]string `json:"fields,omitempty"`
 }
 
 type Link struct {
+	Rel    string `json:"rel"`
 	Href   string `json:"href"`
 	Method string `json:"method,omitempty"`
 }
@@ -90,10 +91,15 @@ func (p *Problem) WithField(field, msg string) *Problem {
 
 func (p *Problem) WithLink(rel string, href string, method string) *Problem {
 	c := *p
-	if c.Links == nil {
-		c.Links = map[string]Link{}
+	c.Links = append([]Link(nil), p.Links...)
+	link := Link{Rel: rel, Href: href, Method: method}
+	for i := range c.Links {
+		if c.Links[i].Rel == rel {
+			c.Links[i] = link
+			return &c
+		}
 	}
-	c.Links[rel] = Link{Href: href, Method: method}
+	c.Links = append(c.Links, link)
 	return &c
 }
 

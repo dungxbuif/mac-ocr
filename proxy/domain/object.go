@@ -13,6 +13,13 @@ type Object struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type ObjectInfo struct {
+	Key          string
+	ContentType  string
+	SizeBytes    int64
+	LastModified time.Time
+}
+
 type ObjectRepository interface {
 	Put(ctx context.Context, key string, body io.Reader, contentType string) error
 	Get(ctx context.Context, key string) (io.ReadCloser, error)

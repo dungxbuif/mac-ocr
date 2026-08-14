@@ -26,3 +26,21 @@ func TestSwaggerHandler(t *testing.T) {
 		})
 	}
 }
+
+func TestDocsHandlerServesDocusaurusCleanRoutes(t *testing.T) {
+	handler := Handler("https://api.test", "https://docs.test")
+	for _, tc := range []struct {
+		path     string
+		contains string
+	}{
+		{path: "/", contains: "OCR Platform documentation"},
+		{path: "/api/OCR_RESPONSE", contains: "OCR response model"},
+		{path: "/api/MCP_INTEGRATION", contains: "MCP integration"},
+	} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") || !strings.Contains(w.Body.String(), tc.contains) {
+			t.Fatalf("GET %s: status=%d content-type=%q missing=%q", tc.path, w.Code, w.Header().Get("Content-Type"), tc.contains)
+		}
+	}
+}

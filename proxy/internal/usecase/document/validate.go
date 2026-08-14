@@ -165,16 +165,28 @@ func ValidateFile(data []byte, contentType string) error {
 }
 
 func ValidateOptions(opts *domain.OCROptions) (*domain.OCROptions, error) {
+	defaultTrue := true
 	if opts == nil {
 		return &domain.OCROptions{
 			RecognitionLevel:             "accurate",
 			Languages:                    []string{"vi-VN", "en-US"},
-			AutomaticallyDetectsLanguage: true,
-			UsesLanguageCorrection:       true,
+			AutomaticallyDetectsLanguage: &defaultTrue,
+			UsesLanguageCorrection:       &defaultTrue,
 		}, nil
 	}
 
 	out := *opts
+	if out.Languages == nil {
+		out.Languages = []string{"vi-VN", "en-US"}
+	}
+	if out.AutomaticallyDetectsLanguage == nil {
+		value := true
+		out.AutomaticallyDetectsLanguage = &value
+	}
+	if out.UsesLanguageCorrection == nil {
+		value := true
+		out.UsesLanguageCorrection = &value
+	}
 	if out.RecognitionLevel == "" {
 		out.RecognitionLevel = "accurate"
 	} else if out.RecognitionLevel != "fast" && out.RecognitionLevel != "accurate" {
@@ -215,7 +227,7 @@ func ValidateOptions(opts *domain.OCROptions) (*domain.OCROptions, error) {
 		return nil, errors.New("minimumTextHeight must be between 0.0 and 1.0")
 	}
 
-	if len(out.Languages) == 0 && !out.AutomaticallyDetectsLanguage {
+	if len(out.Languages) == 0 && !*out.AutomaticallyDetectsLanguage {
 		out.Languages = []string{"vi-VN", "en-US"}
 	}
 

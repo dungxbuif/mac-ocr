@@ -1,0 +1,19 @@
+{
+  "id": "swagger",
+  "title": "Swagger UI",
+  "description": "The running OCR Platform serves the interactive OpenAPI explorer at this route.",
+  "source": "@site/../docs/swagger.md",
+  "sourceDirName": ".",
+  "slug": "/api/v1/docs",
+  "permalink": "/api/v1/docs",
+  "draft": false,
+  "unlisted": true,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": null,
+  "frontMatter": {
+    "slug": "/api/v1/docs",
+    "title": "Swagger UI",
+    "unlisted": true
+  }
+}

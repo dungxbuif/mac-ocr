@@ -165,7 +165,7 @@ func (h *MCPHandler) dispatch(c *gin.Context, userID int64, req mcpRequest) (any
 		}
 		return gin.H{"protocolVersion": mcpProtocolVersion, "capabilities": gin.H{
 			"tools": gin.H{}, "resources": gin.H{"subscribe": true},
-			"tasks": gin.H{"list": gin.H{}, "cancel": gin.H{}, "requests": gin.H{"tools": gin.H{"call": gin.H{}}}},
+			"tasks": gin.H{"requests": gin.H{"tools": gin.H{"call": gin.H{}}}},
 		}, "serverInfo": gin.H{"name": "ocr-platform", "version": "1.0.0"},
 			"instructions": "Submit OCR documents as durable tasks. Poll tasks/get or keep GET /mcp open for task and resource notifications."}, nil
 	case "ping":
@@ -184,10 +184,6 @@ func (h *MCPHandler) dispatch(c *gin.Context, userID int64, req mcpRequest) (any
 		return h.getTask(c, userID, req.Params)
 	case "tasks/result":
 		return h.taskResult(c, userID, req.Params)
-	case "tasks/list":
-		return h.listTasks(c, userID)
-	case "tasks/cancel":
-		return h.cancelTask(c, userID, req.Params)
 	default:
 		return nil, &rpcFailure{-32601, "method not found"}
 	}
@@ -199,8 +195,7 @@ func mcpTools() []gin.H {
 	return []gin.H{
 		{"name": "submit_ocr_document", "description": "Submit one OCR document and return a durable document task.", "inputSchema": item, "execution": gin.H{"taskSupport": "optional"}},
 		{"name": "submit_ocr_batch", "description": "Submit multiple independent OCR documents and return their document task IDs.", "inputSchema": gin.H{"type": "object", "additionalProperties": false, "required": []string{"items"}, "properties": gin.H{"items": gin.H{"type": "array", "minItems": 1, "maxItems": 100, "items": item}}}, "execution": gin.H{"taskSupport": "forbidden"}},
-		{"name": "get_ocr_document", "description": "Read OCR task status and completed result.", "inputSchema": gin.H{"type": "object", "additionalProperties": false, "required": []string{"documentId"}, "properties": gin.H{"documentId": gin.H{"type": "string"}}}},
-		{"name": "cancel_ocr_document", "description": "Cancel a queued OCR task.", "inputSchema": gin.H{"type": "object", "additionalProperties": false, "required": []string{"documentId"}, "properties": gin.H{"documentId": gin.H{"type": "string"}}}},
+		{"name": "get_ocr_document", "description": "Read one OCR task status and completed result by document ID.", "inputSchema": gin.H{"type": "object", "additionalProperties": false, "required": []string{"documentId"}, "properties": gin.H{"documentId": gin.H{"type": "string"}}}},
 	}
 }
 
@@ -209,7 +204,7 @@ func inputSchema() gin.H {
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": gin.H{
-			"url":    gin.H{"type": "string", "format": "uri", "pattern": `^https://`, "description": "Public HTTPS URL. Use URLs for files larger than the Base64 limit."},
+			"url":    gin.H{"type": "string", "format": "uri", "description": "Public HTTPS URL, or an app-owned s3:// sourceUrl returned by /v1/uploads/presign for large uploads."},
 			"base64": gin.H{"type": "string", "contentEncoding": "base64", "description": "Strict standard Base64; maximum decoded size is 25 MiB."},
 		},
 		"oneOf": []gin.H{{"required": []string{"url"}}, {"required": []string{"base64"}}},
@@ -217,7 +212,7 @@ func inputSchema() gin.H {
 }
 
 func ocrOptionsSchema() gin.H {
-	return gin.H{"type": "object", "additionalProperties": false, "properties": gin.H{"recognitionLevel": gin.H{"type": "string", "enum": []string{"fast", "accurate"}}, "languages": gin.H{"type": "array", "items": gin.H{"type": "string"}}, "automaticallyDetectsLanguage": gin.H{"type": "boolean"}, "usesLanguageCorrection": gin.H{"type": "boolean"}, "customWords": gin.H{"type": "array", "items": gin.H{"type": "string"}}, "minimumTextHeight": gin.H{"type": "number", "minimum": 0, "maximum": 1}}}
+	return gin.H{"type": "object", "additionalProperties": false, "properties": gin.H{"recognitionLevel": gin.H{"type": "string", "enum": []string{"fast", "accurate"}, "default": "accurate"}, "languages": gin.H{"type": "array", "items": gin.H{"type": "string"}, "default": []string{"vi-VN", "en-US"}}, "automaticallyDetectsLanguage": gin.H{"type": "boolean", "default": true}, "usesLanguageCorrection": gin.H{"type": "boolean", "default": true}, "customWords": gin.H{"type": "array", "items": gin.H{"type": "string"}, "default": []string{}}, "minimumTextHeight": gin.H{"type": "number", "minimum": 0, "maximum": 1, "default": 0}}}
 }
 
 type mcpToolCall struct {
@@ -292,15 +287,6 @@ func (h *MCPHandler) callTool(c *gin.Context, userID int64, raw json.RawMessage)
 			return nil, toolFailure(err)
 		}
 		return toolJSON(publicMCPDocument(doc)), nil
-	case "cancel_ocr_document":
-		id, fail := documentID(call.Arguments)
-		if fail != nil {
-			return nil, fail
-		}
-		if err := h.docs.Cancel(c.Request.Context(), userID, id); err != nil {
-			return nil, toolFailure(err)
-		}
-		return toolJSON(gin.H{"documentId": id, "status": "cancelled"}), nil
 	default:
 		return nil, &rpcFailure{-32602, "unknown tool"}
 	}
@@ -332,28 +318,6 @@ func (h *MCPHandler) taskResult(c *gin.Context, userID int64, raw json.RawMessag
 	result := toolJSON(publicMCPDocument(doc))
 	result["_meta"] = gin.H{"io.modelcontextprotocol/related-task": gin.H{"taskId": id}}
 	return result, nil
-}
-func (h *MCPHandler) listTasks(c *gin.Context, userID int64) (any, *rpcFailure) {
-	docs, err := h.docs.ListDocuments(c.Request.Context(), userID, "", 100, 0)
-	if err != nil {
-		return nil, toolFailure(err)
-	}
-	tasks := make([]gin.H, len(docs))
-	for i := range docs {
-		tasks[i] = mcpTask(&docs[i])
-	}
-	return gin.H{"tasks": tasks}, nil
-}
-func (h *MCPHandler) cancelTask(c *gin.Context, userID int64, raw json.RawMessage) (any, *rpcFailure) {
-	id, f := taskID(raw)
-	if f != nil {
-		return nil, f
-	}
-	if err := h.docs.Cancel(c.Request.Context(), userID, id); err != nil {
-		return nil, toolFailure(err)
-	}
-	doc := &domain.Document{ID: id, Status: domain.StatusCancelled, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	return mcpTask(doc), nil
 }
 func (h *MCPHandler) readResource(c *gin.Context, userID int64, raw json.RawMessage) (any, *rpcFailure) {
 	var p struct {

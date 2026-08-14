@@ -51,7 +51,7 @@ Quota is reserved only after file/options validation:
 - Single submission: reserve 1.
 - Batch submission: reserve the number of array items.
 - Invalid submission: reserve 0.
-- Queued cancellation: refund 1.
+- Public user cancellation is not exposed. Internal terminal failures may refund quota according to the dispatch/finalization path.
 - Dispatch infrastructure failure: refund 1.
 
 Exhausted quota returns `429 QUOTA_EXCEEDED`.

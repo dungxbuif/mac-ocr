@@ -1,0 +1,24 @@
+{
+  "id": "architecture/TECH_DESIGN",
+  "title": "Technical Design — Current Implementation",
+  "description": "Runtime topology",
+  "source": "@site/../docs/architecture/TECH_DESIGN.md",
+  "sourceDirName": "architecture",
+  "slug": "/architecture/TECH_DESIGN",
+  "permalink": "/architecture/TECH_DESIGN",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": 1786712431000,
+  "frontMatter": {},
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Software Requirements — Current Implementation",
+    "permalink": "/architecture/SRS"
+  },
+  "next": {
+    "title": "Production Readiness Test Report — 2026-08-15",
+    "permalink": "/testing/PROD_READINESS_REPORT"
+  }
+}

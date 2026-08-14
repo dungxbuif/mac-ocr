@@ -27,6 +27,13 @@ type ProcessedInput struct {
 	SHA256      string
 }
 
+type ownedObjectRepository interface {
+	KeyFromOwnURL(rawURL string, userID int64) (key string, owned bool, err error)
+	Stat(ctx context.Context, key string) (*domain.ObjectInfo, error)
+}
+
+const MaxUploadedObjectBytes = MaxURLDownloadBytes
+
 func ProcessBase64(ctx context.Context, userID int64, rawB64 string, objects domain.ObjectRepository) (*ProcessedInput, error) {
 	if rawB64 != strings.TrimSpace(rawB64) || strings.IndexFunc(rawB64, unicode.IsSpace) >= 0 {
 		return nil, fmt.Errorf("%w: whitespace is not allowed", domain.ErrInvalidBase64)
@@ -77,6 +84,20 @@ func ProcessBase64(ctx context.Context, userID int64, rawB64 string, objects dom
 }
 
 func ProcessURL(ctx context.Context, userID int64, rawURL string, objects domain.ObjectRepository) (*ProcessedInput, error) {
+	return ProcessURLWithUploadLimit(ctx, userID, rawURL, objects, MaxUploadedObjectBytes)
+}
+
+func ProcessURLWithUploadLimit(ctx context.Context, userID int64, rawURL string, objects domain.ObjectRepository, maxUploadedBytes int64) (*ProcessedInput, error) {
+	if ownedObjects, ok := objects.(ownedObjectRepository); ok {
+		key, owned, err := ownedObjects.KeyFromOwnURL(rawURL, userID)
+		if err != nil {
+			return nil, err
+		}
+		if owned {
+			return ProcessOwnedObject(ctx, key, objects, ownedObjects, maxUploadedBytes)
+		}
+	}
+
 	if err := ValidateURL(rawURL); err != nil {
 		return nil, err
 	}
@@ -176,12 +197,74 @@ func ProcessURL(ctx context.Context, userID int64, rawURL string, objects domain
 	}, nil
 }
 
+func ProcessOwnedObject(ctx context.Context, key string, objects domain.ObjectRepository, ownedObjects ownedObjectRepository, maxUploadedBytes int64) (*ProcessedInput, error) {
+	if maxUploadedBytes <= 0 {
+		maxUploadedBytes = MaxUploadedObjectBytes
+	}
+	info, err := ownedObjects.Stat(ctx, key)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, fmt.Errorf("%w: uploaded object does not exist or is not readable", domain.ErrInvalidURL)
+		}
+		return nil, fmt.Errorf("%w: stat uploaded object: %v", domain.ErrStorageUnavailable, err)
+	}
+	if info.SizeBytes <= 0 {
+		return nil, fmt.Errorf("%w: uploaded object is empty", domain.ErrBadParamInput)
+	}
+	if info.SizeBytes > maxUploadedBytes {
+		return nil, fmt.Errorf("%w: uploaded object maximum is %d bytes", domain.ErrURLContentTooLarge, maxUploadedBytes)
+	}
+
+	rc, err := objects.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read uploaded object: %v", domain.ErrStorageUnavailable, err)
+	}
+	defer rc.Close()
+
+	hasher := sha256.New()
+	tee := io.TeeReader(rc, hasher)
+	limited := io.LimitReader(tee, maxUploadedBytes+1)
+	buf := new(bytes.Buffer)
+	written, err := io.Copy(buf, limited)
+	if err != nil {
+		return nil, fmt.Errorf("buffer uploaded object: %w", err)
+	}
+	if written > maxUploadedBytes {
+		return nil, fmt.Errorf("%w: uploaded object maximum is %d bytes", domain.ErrURLContentTooLarge, maxUploadedBytes)
+	}
+	if written != info.SizeBytes {
+		return nil, fmt.Errorf("%w: uploaded object changed while being validated", domain.ErrConflict)
+	}
+	contentType, err := DetectMIME(buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateFile(buf.Bytes(), contentType); err != nil {
+		return nil, err
+	}
+
+	return &ProcessedInput{
+		ObjectKey:   key,
+		ContentType: contentType,
+		SizeBytes:   written,
+		SHA256:      hex.EncodeToString(hasher.Sum(nil)),
+	}, nil
+}
+
 func makeInputKey(userID int64, filename string) string {
 	ts := time.Now().UTC().Format("20060102T150405.000")
 	safe := sanitizeFilename(filename)
 	random := make([]byte, 6)
 	_, _ = rand.Read(random)
 	return fmt.Sprintf("inputs/%d/%s_%x_%s", userID, ts, random, safe)
+}
+
+func MakeUploadKey(userID int64, filename string) string {
+	ts := time.Now().UTC().Format("20060102T150405.000")
+	safe := sanitizeFilename(filename)
+	random := make([]byte, 12)
+	_, _ = rand.Read(random)
+	return fmt.Sprintf("uploads/%d/%s_%x_%s", userID, ts, random, safe)
 }
 
 func sanitizeFilename(name string) string {

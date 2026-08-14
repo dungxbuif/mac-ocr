@@ -30,11 +30,25 @@ func TestBase64TooLargeProblemIncludesBatchIndexAndAction(t *testing.T) {
 	var problem struct {
 		Code   string `json:"code"`
 		Detail string `json:"detail"`
+		Links  []struct {
+			Rel string `json:"rel"`
+		} `json:"links"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode problem: %v", err)
 	}
 	if problem.Code != "BASE64_TOO_LARGE" || !strings.Contains(problem.Detail, "batch item 3") || !strings.Contains(problem.Detail, "HTTPS URL") {
 		t.Fatalf("unexpected problem: %s", w.Body.String())
+	}
+	wantLinks := map[string]bool{"presign": false, "capabilities": false}
+	for _, link := range problem.Links {
+		if _, ok := wantLinks[link.Rel]; ok {
+			wantLinks[link.Rel] = true
+		}
+	}
+	for rel, found := range wantLinks {
+		if !found {
+			t.Fatalf("problem response is missing %q recovery link: %s", rel, w.Body.String())
+		}
 	}
 }

@@ -1,0 +1,20 @@
+{
+  "id": "api/API_REFERENCE",
+  "title": "OCR API Reference",
+  "description": "The OCR API is asynchronous. Submission endpoints return 202 Accepted and durable server-generated document identifiers. Clients poll documents, select a notification channel, or use MCP task events until processing reaches a terminal state.",
+  "source": "@site/../docs/api/API_REFERENCE.md",
+  "sourceDirName": "api",
+  "slug": "/api/API_REFERENCE",
+  "permalink": "/api/API_REFERENCE",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": 1786712431000,
+  "frontMatter": {},
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "MCP integration",
+    "permalink": "/api/MCP_INTEGRATION"
+  }
+}

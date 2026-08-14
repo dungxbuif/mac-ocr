@@ -12,6 +12,7 @@ import (
 
 	"macocr/proxy/domain"
 	"macocr/proxy/internal/config"
+	"macocr/proxy/internal/notifications"
 	pgrepo "macocr/proxy/internal/repository/postgres"
 	redisrepo "macocr/proxy/internal/repository/redis"
 )
@@ -56,6 +57,11 @@ func TestPostgresAndRedisIntegration(t *testing.T) {
 	userRepo := pgrepo.NewUserRepository(pgRepo.Pool())
 	configRepo := pgrepo.NewAccountConfigRepository(pgRepo.Pool())
 	apiKeyRepo := pgrepo.NewAPIKeyRepository(pgRepo.Pool())
+	cipher, err := notifications.NewSecretCipher("integration-document-retention-key")
+	if err != nil {
+		t.Fatalf("create notification cipher: %v", err)
+	}
+	docRepo := pgrepo.NewDocumentRepository(pgRepo.Pool(), cipher)
 
 	user, err := userRepo.Create(ctx, &domain.User{
 		Email:        email,
@@ -159,6 +165,84 @@ func TestPostgresAndRedisIntegration(t *testing.T) {
 	}
 	if err := redisRepo.DeleteResult(ctx, resultID); err != nil {
 		t.Fatalf("delete cached OCR result: %v", err)
+	}
+
+	retentionID := fmt.Sprintf("doc_retention_%d", suffix)
+	freshID := fmt.Sprintf("doc_fresh_%d", suffix)
+	queuedID := fmt.Sprintf("doc_queued_%d", suffix)
+	old := time.Now().Add(-48 * time.Hour)
+	for _, row := range []struct {
+		id        string
+		status    domain.DocumentStatus
+		updatedAt time.Time
+	}{
+		{id: retentionID, status: domain.StatusCompleted, updatedAt: old},
+		{id: freshID, status: domain.StatusCompleted, updatedAt: time.Now()},
+		{id: queuedID, status: domain.StatusQueued, updatedAt: old},
+	} {
+		if _, err := pgRepo.Pool().Exec(ctx, `INSERT INTO documents
+			(id, user_id, status, input_key, input_content_type, result_key, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			row.id, user.ID, row.status, "inputs/"+row.id, "image/png", "results/"+row.id, row.updatedAt); err != nil {
+			t.Fatalf("insert retention fixture %s: %v", row.id, err)
+		}
+	}
+	cutoff := time.Now().Add(-24 * time.Hour)
+	expiredDocs, err := docRepo.ListExpiredDocuments(ctx, cutoff, 100)
+	if err != nil {
+		t.Fatalf("list expired documents: %v", err)
+	}
+	foundRetention := false
+	for _, doc := range expiredDocs {
+		if doc.ID == retentionID {
+			foundRetention = doc.InputKey != "" && doc.ResultKey != ""
+		}
+		if doc.ID == freshID || doc.ID == queuedID {
+			t.Fatalf("non-expired document selected for deletion: %s", doc.ID)
+		}
+	}
+	if !foundRetention {
+		t.Fatal("expired terminal document was not selected with its object keys")
+	}
+	referenced, err := docRepo.IsInputKeyReferenced(ctx, "inputs/"+retentionID)
+	if err != nil || !referenced {
+		t.Fatalf("input reference lookup: referenced=%v err=%v", referenced, err)
+	}
+	referenced, err = docRepo.IsInputKeyReferenced(ctx, "uploads/unknown/orphan")
+	if err != nil || referenced {
+		t.Fatalf("orphan input reference lookup: referenced=%v err=%v", referenced, err)
+	}
+	if err := docRepo.DeleteExpiredDocument(ctx, retentionID, cutoff); err != nil {
+		t.Fatalf("delete expired document: %v", err)
+	}
+	if _, err := docRepo.GetByID(ctx, retentionID); err != domain.ErrNotFound {
+		t.Fatalf("deleted document lookup error = %v, want %v", err, domain.ErrNotFound)
+	}
+	if _, err := docRepo.GetByID(ctx, freshID); err != nil {
+		t.Fatalf("fresh terminal document was deleted: %v", err)
+	}
+	if _, err := docRepo.GetByID(ctx, queuedID); err != nil {
+		t.Fatalf("queued document was deleted: %v", err)
+	}
+
+	legacyID := fmt.Sprintf("doc_legacy_%d", suffix)
+	if _, err := pgRepo.Pool().Exec(ctx, `INSERT INTO documents
+		(id, user_id, status, input_key, input_content_type, input_size_bytes, updated_at)
+		VALUES ($1,$2,'failed',$3,NULL,0,now())`, legacyID, user.ID, "inputs/"+legacyID); err != nil {
+		t.Fatalf("insert legacy nullable document: %v", err)
+	}
+	adminDocs, err := docRepo.ListByUser(ctx, 0, "", 100, 0)
+	if err != nil {
+		t.Fatalf("admin list must tolerate legacy nullable input metadata: %v", err)
+	}
+	foundLegacy := false
+	for _, doc := range adminDocs {
+		if doc.ID == legacyID {
+			foundLegacy = doc.InputContentType == "" && doc.InputSizeBytes == 0
+			break
+		}
+	}
+	if !foundLegacy {
+		t.Fatal("admin list did not return normalized legacy document")
 	}
 
 	rateLimitID := fmt.Sprintf("integration-rate-%d", suffix)

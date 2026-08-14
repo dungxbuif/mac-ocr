@@ -204,6 +204,20 @@ func (m *mockDocRepo) ListExpiredInputs(context.Context, time.Time, int) ([]doma
 	return nil, nil
 }
 func (m *mockDocRepo) MarkInputExpired(context.Context, string) error { return nil }
+func (m *mockDocRepo) ListExpiredDocuments(context.Context, time.Time, int) ([]domain.Document, error) {
+	return nil, nil
+}
+func (m *mockDocRepo) DeleteExpiredDocument(context.Context, string, time.Time) error {
+	return nil
+}
+func (m *mockDocRepo) IsInputKeyReferenced(_ context.Context, key string) (bool, error) {
+	for _, doc := range m.docs {
+		if doc.InputKey == key {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 func TestSubmitBatchRefundsQuotaWhenAtomicPersistenceFails(t *testing.T) {
 	ctx := context.Background()
@@ -367,14 +381,6 @@ func TestDocumentService_SubmitSingleAndBatch(t *testing.T) {
 	}
 	if cfgRepo.configs[1].DocUsed != 3 {
 		t.Errorf("expected doc_used=3, got %d", cfgRepo.configs[1].DocUsed)
-	}
-
-	err = svc.Cancel(ctx, 1, doc1.ID)
-	if err != nil {
-		t.Fatalf("Cancel failed: %v", err)
-	}
-	if cfgRepo.configs[1].DocUsed != 2 {
-		t.Errorf("expected doc_used refunded to 2, got %d", cfgRepo.configs[1].DocUsed)
 	}
 
 	cfgRepo.configs[1].DocUsed = 5

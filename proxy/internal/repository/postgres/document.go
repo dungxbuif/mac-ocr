@@ -220,7 +220,7 @@ func (r *DocumentRepository) ListByUser(ctx context.Context, userID int64, statu
 	}
 
 	query := `SELECT id, user_id, status,
-	                 COALESCE(input_key, ''), input_sha256, input_content_type, input_size_bytes, options_json,
+	                 COALESCE(input_key, ''), COALESCE(input_sha256, ''), COALESCE(input_content_type, ''), COALESCE(input_size_bytes, 0), options_json,
 	                 result_key, result_text, error_detail, attempt_id, result_expires_at,
 	                 created_at, updated_at
 	          FROM documents WHERE true`
@@ -521,7 +521,7 @@ func (r *DocumentRepository) ListExpiredResults(ctx context.Context, before time
 }
 
 func (r *DocumentRepository) MarkResultExpired(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE documents SET result_key = NULL, result_text = NULL, updated_at = now()
+	_, err := r.pool.Exec(ctx, `UPDATE documents SET result_key = NULL, result_text = NULL
 		WHERE id = $1 AND result_expires_at <= now()`, id)
 	if err != nil {
 		return fmt.Errorf("mark result expired: %w", err)
@@ -552,12 +552,51 @@ func (r *DocumentRepository) ListExpiredInputs(ctx context.Context, before time.
 }
 
 func (r *DocumentRepository) MarkInputExpired(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE documents SET input_key=NULL, updated_at=now()
+	_, err := r.pool.Exec(ctx, `UPDATE documents SET input_key=NULL
 		WHERE id=$1 AND status IN ('completed','failed','cancelled')`, id)
 	if err != nil {
 		return fmt.Errorf("mark input expired: %w", err)
 	}
 	return nil
+}
+
+func (r *DocumentRepository) ListExpiredDocuments(ctx context.Context, before time.Time, limit int) ([]domain.Document, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `SELECT id, COALESCE(input_key, ''), COALESCE(result_key, '') FROM documents
+		WHERE status IN ('completed','failed','cancelled') AND updated_at <= $1
+		ORDER BY updated_at ASC LIMIT $2`, before, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list expired documents: %w", err)
+	}
+	defer rows.Close()
+	var docs []domain.Document
+	for rows.Next() {
+		var doc domain.Document
+		if err := rows.Scan(&doc.ID, &doc.InputKey, &doc.ResultKey); err != nil {
+			return nil, fmt.Errorf("scan expired document: %w", err)
+		}
+		docs = append(docs, doc)
+	}
+	return docs, rows.Err()
+}
+
+func (r *DocumentRepository) DeleteExpiredDocument(ctx context.Context, id string, before time.Time) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM documents
+		WHERE id=$1 AND status IN ('completed','failed','cancelled') AND updated_at <= $2`, id, before)
+	if err != nil {
+		return fmt.Errorf("delete expired document: %w", err)
+	}
+	return nil
+}
+
+func (r *DocumentRepository) IsInputKeyReferenced(ctx context.Context, key string) (bool, error) {
+	var exists bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM documents WHERE input_key=$1)`, key).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check document input reference: %w", err)
+	}
+	return exists, nil
 }
 
 func insertNotificationEvent(ctx context.Context, tx pgx.Tx, cipher *notifications.SecretCipher, event *domain.NotificationEvent) error {

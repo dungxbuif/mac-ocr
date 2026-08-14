@@ -1,6 +1,15 @@
-.PHONY: build build-admin run admin local-dev mock-native test vet fmt tidy up down logs clean s3 s3-stop s3-test
+.PHONY: build build-web build-all build-admin run admin local-dev mock-native test vet fmt tidy up down logs clean s3 s3-stop s3-test
 
 build:
+	go build -buildvcs=false ./...
+
+build-web:
+	cd admin-ui && npm ci && npm run build
+	cd ../docs-site && npm ci && npm run build
+
+build-all: build-web
+	go test ./...
+	go vet ./...
 	go build -buildvcs=false ./...
 
 build-admin:

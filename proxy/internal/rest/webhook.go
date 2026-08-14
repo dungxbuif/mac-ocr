@@ -18,6 +18,7 @@ import (
 )
 
 const maxWebhookRequestBytes = 1024 * 1024
+const maxNativeVerifyBytes = 4 * 1024
 
 type WebhookHandler struct {
 	docs       domain.DocumentRepository
@@ -50,6 +51,59 @@ func NewWebhookHandler(
 		results:    results,
 		resultTTL:  resultTTL,
 	}
+}
+
+// HandleNativeVerify performs a side-effect-free signed handshake so the
+// native menu-bar app can validate the proxy URL, node ID, clock, and shared
+// HMAC key before opening its OCR listener.
+func (h *WebhookHandler) HandleNativeVerify(c *gin.Context) {
+	if c.ContentType() != "application/json" {
+		RespondProblem(c, errs.New(errs.CodeUnsupportedContentType, http.StatusUnsupportedMediaType, "Only application/json is supported"))
+		return
+	}
+	nodeID := c.GetHeader("X-Native-Node-Id")
+	ts := c.GetHeader("X-Native-Timestamp")
+	eventID := c.GetHeader("X-Native-Event-Id")
+	sig := c.GetHeader("X-Native-Signature")
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxNativeVerifyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		if respondRequestTooLarge(c, err, maxNativeVerifyBytes) {
+			return
+		}
+		RespondProblem(c, errs.InvalidInput("failed to read verification body"))
+		return
+	}
+	if h.authSecret == "" {
+		RespondProblem(c, errs.ServiceUnavailable("native authentication is not configured", nil))
+		return
+	}
+	if err := native.VerifyWebhook(h.authSecret, nodeID, ts, eventID, body, sig); err != nil {
+		h.logger.Warn("native connection verification failed", "error", err, "nodeID", nodeID)
+		RespondProblem(c, errs.Unauthorized("native shared key verification failed"))
+		return
+	}
+
+	var payload struct {
+		NodeID string `json:"nodeId"`
+		Nonce  string `json:"nonce"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		RespondProblem(c, errs.InvalidInput("invalid native verification body"))
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		RespondProblem(c, errs.InvalidInput("verification body must contain one JSON object"))
+		return
+	}
+	if payload.NodeID == "" || payload.NodeID != nodeID || len(payload.Nonce) < 16 || len(payload.Nonce) > 128 || len(eventID) < 16 || len(eventID) > 128 {
+		RespondProblem(c, errs.InvalidInput("verification identity or nonce is invalid"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "verified", "nodeId": nodeID})
 }
 
 func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {

@@ -1,0 +1,58 @@
+{
+  "docusaurus-plugin-content-docs": {
+    "default": {
+      "path": "/",
+      "versions": [
+        {
+          "name": "current",
+          "label": "Next",
+          "isLast": true,
+          "path": "/",
+          "mainDocId": "README",
+          "docs": [
+            {
+              "id": "api/API_REFERENCE",
+              "path": "/api/API_REFERENCE",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "api/MCP_INTEGRATION",
+              "path": "/api/MCP_INTEGRATION",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "api/OCR_RESPONSE",
+              "path": "/api/OCR_RESPONSE",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "guides/onboarding",
+              "path": "/guides/onboarding",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "README",
+              "path": "/",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "swagger",
+              "path": "/api/v1/docs",
+              "unlisted": true
+            }
+          ],
+          "draftIds": [],
+          "sidebars": {
+            "docsSidebar": {
+              "link": {
+                "path": "/",
+                "label": "README"
+              }
+            }
+          }
+        }
+      ],
+      "breadcrumbs": true
+    }
+  }
+}
