@@ -1,0 +1,33 @@
+.git
+.github
+.planning
+.codex
+
+# Never send local credentials or runtime configuration to the Docker daemon.
+.env
+**/.env
+*.env
+**/*.env
+*.env.local
+**/*.env.local
+
+# Build outputs and dependency caches are recreated in their own stages.
+**/node_modules
+**/.build
+**/.swiftpm
+**/*.test
+**/*.out
+**/*.prof
+**/*.log
+proxy/bin
+proxy/proxy
+native/dist
+local-dev/s3/data
+
+# Not required to build the Linux API image.
+native
+local-dev
+.ocr-eval
+.DS_Store
+**/.DS_Store
+RELEASE_NOTES*
