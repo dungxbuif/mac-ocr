@@ -4,15 +4,15 @@ import ComponentCreator from '@docusaurus/ComponentCreator';
 export default [
   {
     path: '/',
-    component: ComponentCreator('/', 'c20'),
+    component: ComponentCreator('/', '0ff'),
     routes: [
       {
         path: '/',
-        component: ComponentCreator('/', 'fd7'),
+        component: ComponentCreator('/', '728'),
         routes: [
           {
             path: '/',
-            component: ComponentCreator('/', '301'),
+            component: ComponentCreator('/', '30f'),
             routes: [
               {
                 path: '/api/API_REFERENCE',
@@ -45,12 +45,12 @@ export default [
               },
               {
                 path: '/RELEASE_NOTES',
-                component: ComponentCreator('/RELEASE_NOTES', '124'),
+                component: ComponentCreator('/RELEASE_NOTES', '054'),
                 exact: true
               },
               {
                 path: '/',
-                component: ComponentCreator('/', 'c7a'),
+                component: ComponentCreator('/', 'cc0'),
                 exact: true,
                 sidebar: "docsSidebar"
               }
