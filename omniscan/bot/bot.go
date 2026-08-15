@@ -178,10 +178,14 @@ func (b *OmniScanBot) setupHandlers() {
 			return
 		}
 
-		isScanCmd := strings.HasPrefix(text, "*scan")
-		isOCRCmd := strings.HasPrefix(text, "*ocr")
+		// Temporarily disabled *scan command trigger
+		if strings.HasPrefix(text, "*scan") {
+			b.sendReply(channel, m, "💡 Tính năng `*scan` (AI Reasoning) đang tạm thời tắt. Vui lòng sử dụng lệnh `*ocr` để bóc tách văn bản!")
+			return
+		}
 
-		if !isScanCmd && !isOCRCmd && len(m.Attachments) == 0 {
+		isOCRCmd := strings.HasPrefix(text, "*ocr")
+		if !isOCRCmd && len(m.Attachments) == 0 {
 			return
 		}
 
@@ -189,15 +193,8 @@ func (b *OmniScanBot) setupHandlers() {
 		var isAttachment bool
 		var attachmentName string
 		var attachmentSize int
-		var customPrompt string
 
-		if isScanCmd {
-			// *scan ["custom prompt"] [url]
-			rest := strings.TrimSpace(strings.TrimPrefix(text, "*scan"))
-			args := ParseScanArgs(rest)
-			customPrompt = args.CustomPrompt
-			targetURL = args.URL
-		} else if isOCRCmd {
+		if isOCRCmd {
 			parts := strings.Fields(text)
 			if len(parts) > 1 {
 				targetURL = parts[1]
@@ -213,7 +210,7 @@ func (b *OmniScanBot) setupHandlers() {
 		}
 
 		if targetURL == "" {
-			b.sendReply(channel, m, "⚠️ Vui lòng cung cấp URL ảnh/PDF hoặc đính kèm file cùng câu lệnh `*scan` hoặc `*ocr`!")
+			b.sendReply(channel, m, "⚠️ Vui lòng cung cấp URL ảnh/PDF hoặc đính kèm file cùng câu lệnh `*ocr`!")
 			return
 		}
 
@@ -230,16 +227,12 @@ func (b *OmniScanBot) setupHandlers() {
 		}
 
 		// Dynamically fetch user-specific limits from DB (auto-provisions defaults on first encounter)
-		scanLimit, ocrLimit, _ := b.getUserLimits(m.SenderID)
+		_, ocrLimit, _ := b.getUserLimits(m.SenderID)
 
 		var allowed bool = true
 		var currentCount int = 1
 		if !isUnlimitedUser(m.SenderID) {
-			if isOCRCmd {
-				allowed, currentCount, err = b.store.CheckAndIncrementOCRQuota(m.SenderID, ocrLimit)
-			} else {
-				allowed, currentCount, err = b.store.CheckAndIncrementScanQuota(m.SenderID, scanLimit)
-			}
+			allowed, currentCount, err = b.store.CheckAndIncrementOCRQuota(m.SenderID, ocrLimit)
 			if err != nil {
 				log.Printf("❌ Quota error for user %s: %v", m.SenderID, err)
 				b.sendReply(channel, m, "⚠️ Có lỗi xảy ra khi kiểm tra lượt dùng.")
@@ -247,51 +240,45 @@ func (b *OmniScanBot) setupHandlers() {
 			}
 
 			if !allowed {
-				var limitLabel string
-				if isOCRCmd {
-					limitLabel = fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt OCR miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, ocrLimit)
-				} else {
-					limitLabel = fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt scan miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, scanLimit)
-				}
+				limitLabel := fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt OCR miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, ocrLimit)
 				b.sendReply(channel, m, limitLabel)
 				return
 			}
 		}
 
-		if isOCRCmd {
-			// Raw OCR flow — uses SubmitAndPollFull so we get bbox blocks for 2D layout
-			log.Printf("🔍 [Raw OCR %d/%d] Processing for %s (URL: %s)", currentCount, ocrLimit, sender, targetURL)
-			b.sendReply(channel, m, fmt.Sprintf("⏳ Đang bóc tách OCR (Lượt %d/%d), vui lòng chờ...", currentCount, ocrLimit))
+		// Raw OCR flow — uses SubmitAndPollFull so we get bbox blocks for 2D layout
+		log.Printf("🔍 [Raw OCR %d/%d] Processing for %s (URL: %s)", currentCount, ocrLimit, sender, targetURL)
+		b.sendReply(channel, m, fmt.Sprintf("⏳ Đang bóc tách OCR (Lượt %d/%d), vui lòng chờ...", currentCount, ocrLimit))
 
-			go func(msg *mezon.ChannelMessage, urlToScan, userID string, asAttachment bool) {
-				ctx, cancel := context.WithTimeout(context.Background(), b.cfg.OCRProcessTimeout)
-				defer cancel()
+		go func(msg *mezon.ChannelMessage, urlToScan, userID string, asAttachment bool) {
+			ctx, cancel := context.WithTimeout(context.Background(), b.cfg.OCRProcessTimeout)
+			defer cancel()
 
-				result, err := b.submitOCRFull(ctx, urlToScan, asAttachment)
-				if err != nil {
-					log.Printf("❌ OCR Error: %v. Refunded quota.", err)
-					_ = b.store.RefundOCRQuota(userID)
-					b.sendReply(channel, msg, FormatFriendlyOCRError(err))
-					return
-				}
+			result, err := b.submitOCRFull(ctx, urlToScan, asAttachment)
+			if err != nil {
+				log.Printf("❌ OCR Error: %v. Refunded quota.", err)
+				_ = b.store.RefundOCRQuota(userID)
+				b.sendReply(channel, msg, FormatFriendlyOCRError(err))
+				return
+			}
 
-				reconstructed := ocrlib.ReconstructLayout(result)
-				out := BuildOCRResult(result, reconstructed, currentCount, ocrLimit)
+			reconstructed := ocrlib.ReconstructLayout(result)
+			out := BuildOCRResult(result, reconstructed, currentCount, ocrLimit)
 
-				// Deliver embed card
-				sentMsg, sendErr := b.sendReplyContent(channel, msg, out.Content)
+			// Deliver embed card
+			sentMsg, sendErr := b.sendReplyContent(channel, msg, out.Content)
 
-				// Save session for optional follow-up Q&A on the OCR result
-				if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
-					_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", "Raw OCR", reconstructed)
-				}
-				if msg.ID != "" {
-					_ = b.sessionStore.CreateSession(msg.ID, userID, "doc", "Raw OCR", reconstructed)
-				}
-			}(m, targetURL, m.SenderID, isAttachment)
-			return
-		}
+			// Save session for optional follow-up Q&A on the OCR result
+			if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
+				_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", "Raw OCR", reconstructed)
+			}
+			if msg.ID != "" {
+				_ = b.sessionStore.CreateSession(msg.ID, userID, "doc", "Raw OCR", reconstructed)
+			}
+		}(m, targetURL, m.SenderID, isAttachment)
+		return
 
+		/* ── TẠM COMMENT ĐOẠN XỬ LÝ *SCAN THEO YÊU CẦU ──
 		// Smart AI Agent *scan flow.
 		if !b.agent.IsHealthy() {
 			log.Printf("⚠️ [*scan] LLM endpoint down — failing fast.")
@@ -359,6 +346,7 @@ func (b *OmniScanBot) setupHandlers() {
 				_ = b.sessionStore.CreateSession(msg.ID, userID, "doc", res.DocType, reconstructed)
 			}
 		}(m, targetURL, m.SenderID, customPrompt, isAttachment)
+		── KẾT THÚC COMMENT *SCAN ── */
 	})
 }
 

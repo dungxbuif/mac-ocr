@@ -48,17 +48,7 @@ func (b *OmniScanBot) handleScanDetailButton(channel *mezon.TextChannel, e *mezo
 // on the stored OCR text and posts the AI embed in-thread. The result message
 // replaces the session with a new one keyed to the AI output.
 func (b *OmniScanBot) handleScanMoreButton(channel *mezon.TextChannel, e *mezon.MessageButtonClick) {
-	sess, err := b.sessionStore.GetSession(e.MessageID)
-	if err != nil {
-		log.Printf("❌ scan_more %s: %v", e.MessageID, err)
-		b.sendText(channel, e.SenderID, "⚠️ Không tìm thấy phiên tài liệu (lỗi đọc session).")
-		return
-	}
-	if sess == nil {
-		b.sendText(channel, e.SenderID, "⚠️ Phiên tài liệu đã hết hạn (24h). Hãy `*ocr` lại để phân tích AI.")
-		return
-	}
-	b.upgradeOCRToScan(channel, e.SenderID, sess)
+	b.sendText(channel, e.SenderID, "💡 Tính năng `*scan` (AI Document Intelligence) đang tạm thời tắt. Bạn có thể sử dụng `*ocr` để bóc tách văn bản!")
 }
 
 // upgradeOCRToScan runs the AI *scan flow on an existing session's OCR text.
