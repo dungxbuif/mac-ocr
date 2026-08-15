@@ -125,17 +125,32 @@ func (b *OmniScanBot) setupHandlers() {
 		// leading command prefix ("*") marks a real command, not a follow-up
 		// question, so route it to the command dispatcher instead.
 		if len(m.References) > 0 && text != "" && !strings.HasPrefix(text, "*") {
-			refMsgID := m.RefMessageID()
-			sess, err := b.sessionStore.GetSession(refMsgID)
-			if err != nil {
-				log.Printf("⚠️ [Reply] session lookup error for ref %s: %v", refMsgID, err)
+			var sess *storage.ScanSession
+			var foundRefID string
+			for _, ref := range m.References {
+				for _, candidateID := range []string{ref.MessageRefID, ref.MessageID} {
+					if candidateID == "" {
+						continue
+					}
+					s, err := b.sessionStore.GetSession(candidateID)
+					if err == nil && s != nil {
+						sess = s
+						foundRefID = candidateID
+						break
+					}
+				}
+				if sess != nil {
+					break
+				}
 			}
+
 			if sess != nil {
+				log.Printf("🧵 [Reply] found active Q&A session %s for user %s (%s)", foundRefID, sender, m.SenderID)
 				b.handleThreadQuestion(channel, m, sess, text)
 				return
 			}
-			// Reply to a message that has no Q&A session (too old, or never
-			// scanned). Tell the user instead of silently ignoring them.
+
+			refMsgID := m.RefMessageID()
 			log.Printf("📩 [Reply] no session for ref %s — not a scan result", refMsgID)
 			b.sendReply(channel, m, "⚠️ Tin nhắn này không có phiên hỏi đáp. Hãy `*scan` hoặc `*ocr` một tài liệu mới, rồi **reply** tin nhắn kết quả để hỏi AI.")
 			return
