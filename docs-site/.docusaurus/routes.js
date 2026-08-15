@@ -4,15 +4,15 @@ import ComponentCreator from '@docusaurus/ComponentCreator';
 export default [
   {
     path: '/',
-    component: ComponentCreator('/', '43e'),
+    component: ComponentCreator('/', '4a2'),
     routes: [
       {
         path: '/',
-        component: ComponentCreator('/', '29e'),
+        component: ComponentCreator('/', '342'),
         routes: [
           {
             path: '/',
-            component: ComponentCreator('/', 'c5e'),
+            component: ComponentCreator('/', '1b6'),
             routes: [
               {
                 path: '/api/API_REFERENCE',
@@ -38,6 +38,12 @@ export default [
                 exact: true
               },
               {
+                path: '/guides/OMNISCAN_BOT',
+                component: ComponentCreator('/guides/OMNISCAN_BOT', 'f10'),
+                exact: true,
+                sidebar: "docsSidebar"
+              },
+              {
                 path: '/guides/onboarding',
                 component: ComponentCreator('/guides/onboarding', '356'),
                 exact: true,
@@ -45,7 +51,7 @@ export default [
               },
               {
                 path: '/RELEASE_NOTES',
-                component: ComponentCreator('/RELEASE_NOTES', '854'),
+                component: ComponentCreator('/RELEASE_NOTES', '2c0'),
                 exact: true
               },
               {

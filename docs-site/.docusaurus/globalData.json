@@ -26,6 +26,11 @@
               "sidebar": "docsSidebar"
             },
             {
+              "id": "guides/OMNISCAN_BOT",
+              "path": "/guides/OMNISCAN_BOT",
+              "sidebar": "docsSidebar"
+            },
+            {
               "id": "guides/onboarding",
               "path": "/guides/onboarding",
               "sidebar": "docsSidebar"

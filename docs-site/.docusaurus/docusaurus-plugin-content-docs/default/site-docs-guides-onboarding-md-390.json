@@ -22,7 +22,7 @@
     "permalink": "/"
   },
   "next": {
-    "title": "OCR response model",
-    "permalink": "/api/OCR_RESPONSE"
+    "title": "OmniScan Bot Integration",
+    "permalink": "/guides/OMNISCAN_BOT"
   }
 }

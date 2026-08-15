@@ -1,0 +1,28 @@
+{
+  "id": "guides/OMNISCAN_BOT",
+  "title": "OmniScan Bot Integration",
+  "description": "OmniScan is the official AI-powered bot service for the Mezon Chat Platform, connecting native Apple Silicon MacOCR with LLM reasoning agents.",
+  "source": "@site/../docs/guides/OMNISCAN_BOT.md",
+  "sourceDirName": "guides",
+  "slug": "/guides/OMNISCAN_BOT",
+  "permalink": "/guides/OMNISCAN_BOT",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": null,
+  "sidebarPosition": 3,
+  "frontMatter": {
+    "title": "OmniScan Bot Integration",
+    "sidebar_position": 3
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "OCR API quickstart",
+    "permalink": "/guides/onboarding"
+  },
+  "next": {
+    "title": "OCR response model",
+    "permalink": "/api/OCR_RESPONSE"
+  }
+}
