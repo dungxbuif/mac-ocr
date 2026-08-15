@@ -58,9 +58,9 @@ func (c *userLimitCache) invalidate(userID string) {
 	delete(c.items, userID)
 }
 
-// unlimitedUserWhitelist contains user IDs that are hardcoded to have unlimited quota.
-var unlimitedUserWhitelist = map[string]bool{
-	"1783704549828071424": true, // Admin / Superuser
+// isUnlimitedUser reports whether the given user ID is completely exempt from all quota checks.
+func isUnlimitedUser(userID string) bool {
+	return userID == "1783704549828071424" 
 }
 
 // getUserLimits is the bot-facing helper: cache-first, falling back to the
@@ -68,9 +68,6 @@ var unlimitedUserWhitelist = map[string]bool{
 // caching the result. On a DB error it falls back to the env defaults so a
 // transient blip never blocks a reply — the atomic quota check still guards.
 func (b *OmniScanBot) getUserLimits(userID string) (scan, ocr, ask int) {
-	if unlimitedUserWhitelist[userID] {
-		return 999999, 999999, 999999
-	}
 	if scan, ocr, ask, ok := b.limits.get(userID); ok {
 		return scan, ocr, ask
 	}

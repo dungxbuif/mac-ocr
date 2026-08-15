@@ -232,28 +232,30 @@ func (b *OmniScanBot) setupHandlers() {
 		// Dynamically fetch user-specific limits from DB (auto-provisions defaults on first encounter)
 		scanLimit, ocrLimit, _ := b.getUserLimits(m.SenderID)
 
-		var allowed bool
-		var currentCount int
-		if isOCRCmd {
-			allowed, currentCount, err = b.store.CheckAndIncrementOCRQuota(m.SenderID, ocrLimit)
-		} else {
-			allowed, currentCount, err = b.store.CheckAndIncrementScanQuota(m.SenderID, scanLimit)
-		}
-		if err != nil {
-			log.Printf("❌ Quota error for user %s: %v", m.SenderID, err)
-			b.sendReply(channel, m, "⚠️ Có lỗi xảy ra khi kiểm tra lượt dùng.")
-			return
-		}
+		var allowed bool = true
+		var currentCount int = 1
+		if !isUnlimitedUser(m.SenderID) {
+			if isOCRCmd {
+				allowed, currentCount, err = b.store.CheckAndIncrementOCRQuota(m.SenderID, ocrLimit)
+			} else {
+				allowed, currentCount, err = b.store.CheckAndIncrementScanQuota(m.SenderID, scanLimit)
+			}
+			if err != nil {
+				log.Printf("❌ Quota error for user %s: %v", m.SenderID, err)
+				b.sendReply(channel, m, "⚠️ Có lỗi xảy ra khi kiểm tra lượt dùng.")
+				return
+			}
 
-		if !allowed {
-			var limitLabel string
-		if isOCRCmd {
-			limitLabel = fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt OCR miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, ocrLimit)
-		} else {
-			limitLabel = fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt scan miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, scanLimit)
-		}
-		b.sendReply(channel, m, limitLabel)
-			return
+			if !allowed {
+				var limitLabel string
+				if isOCRCmd {
+					limitLabel = fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt OCR miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, ocrLimit)
+				} else {
+					limitLabel = fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt scan miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, scanLimit)
+				}
+				b.sendReply(channel, m, limitLabel)
+				return
+			}
 		}
 
 		if isOCRCmd {
@@ -353,16 +355,22 @@ func (b *OmniScanBot) setupHandlers() {
 
 func (b *OmniScanBot) handleThreadQuestion(channel *mezon.TextChannel, m *mezon.ChannelMessage, sess *storage.ScanSession, question string) {
 	_, _, askLimit := b.getUserLimits(m.SenderID)
-	allowed, askCount, err := b.sessionStore.CheckAndIncrementAskQuota(sess.SessionID, askLimit)
-	if err != nil {
-		log.Printf("❌ Ask quota error: %v", err)
-		b.sendReply(channel, m, "⚠️ Có lỗi xảy ra khi kiểm tra số câu hỏi.")
-		return
-	}
 
-	if !allowed {
-		b.sendReply(channel, m, fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** câu hỏi cho tài liệu này! Vui lòng gửi `*scan` tài liệu mới.", askLimit, askLimit))
-		return
+	var allowed bool = true
+	var askCount int = 1
+	var err error
+	if !isUnlimitedUser(m.SenderID) {
+		allowed, askCount, err = b.sessionStore.CheckAndIncrementAskQuota(sess.SessionID, askLimit)
+		if err != nil {
+			log.Printf("❌ Ask quota error: %v", err)
+			b.sendReply(channel, m, "⚠️ Có lỗi xảy ra khi kiểm tra số câu hỏi.")
+			return
+		}
+
+		if !allowed {
+			b.sendReply(channel, m, fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** câu hỏi cho tài liệu này! Vui lòng gửi `*scan` tài liệu mới.", askLimit, askLimit))
+			return
+		}
 	}
 
 	b.sendReply(channel, m, fmt.Sprintf("💭 🧠 AI đang suy nghĩ câu trả lời (Câu %d/%d)...", askCount, askLimit))

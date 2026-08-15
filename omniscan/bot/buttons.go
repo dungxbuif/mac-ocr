@@ -67,14 +67,20 @@ func (b *OmniScanBot) handleScanMoreButton(channel *mezon.TextChannel, e *mezon.
 // with a mention. On failure the scan quota is refunded.
 func (b *OmniScanBot) upgradeOCRToScan(channel *mezon.TextChannel, userID string, sess *storage.ScanSession) {
 	scanLimit, _, askLimit := b.getUserLimits(userID)
-	allowed, currentCount, err := b.store.CheckAndIncrementScanQuota(userID, scanLimit)
-	if err != nil {
-		b.sendText(channel, userID, "⚠️ Có lỗi khi kiểm tra lượt scan.")
-		return
-	}
-	if !allowed {
-		b.sendText(channel, userID, fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt scan hôm nay. Vui lòng quay lại ngày mai.", currentCount, scanLimit))
-		return
+
+	var allowed bool = true
+	var currentCount int = 1
+	var err error
+	if !isUnlimitedUser(userID) {
+		allowed, currentCount, err = b.store.CheckAndIncrementScanQuota(userID, scanLimit)
+		if err != nil {
+			b.sendText(channel, userID, "⚠️ Có lỗi khi kiểm tra lượt scan.")
+			return
+		}
+		if !allowed {
+			b.sendText(channel, userID, fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt scan hôm nay. Vui lòng quay lại ngày mai.", currentCount, scanLimit))
+			return
+		}
 	}
 	if !b.agent.IsHealthy() {
 		_ = b.store.RefundScanQuota(userID)
