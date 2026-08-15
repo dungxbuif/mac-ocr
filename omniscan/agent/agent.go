@@ -133,20 +133,46 @@ NGUYÊN TẮC:
 	}, nil
 }
 
-func (a *Agent) AnswerQuestion(ctx context.Context, ocrText, question string) (string, error) {
-	systemPrompt := `Bạn là AI Agent trợ lý hỏi đáp tài liệu. 
-Dựa TRỰC TIẾP và CHÍNH XÁC vào nội dung tài liệu OCR được cung cấp dưới đây để trả lời câu hỏi của người dùng.
+type QAPair struct {
+	Question string
+	Answer   string
+}
+
+func (a *Agent) AnswerQuestion(ctx context.Context, ocrText string, history []QAPair, question string) (string, error) {
+	systemPrompt := `Bạn là AI Agent trợ lý hỏi đáp tài liệu thông minh.
+Dựa TRỰC TIẾP và CHÍNH XÁC vào nội dung tài liệu OCR và ngữ cảnh lịch sử cuộc trò chuyện (nếu có) để trả lời câu hỏi của người dùng.
 - Trả lời ngắn gọn, chính xác, nêu rõ căn cứ trong văn bản (nếu có).
+- Hiểu ngữ cảnh các câu hỏi và câu trả lời trước đó trong cuộc hội thoại để trả lời tiếp nối mượt mà.
 - Nếu thông tin không có trong tài liệu, hãy trả lời rõ: "Thông tin này không xuất hiện trong tài liệu được cung cấp."`
 
-	userMessage := fmt.Sprintf("📄 NỘI DUNG TÀI LIỆU OCR:\n```\n%s\n```\n\n❓ CÂU HỎI CỦA NGƯỜI DÙNG: %s", ocrText, question)
+	messages := []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
+		{Role: openai.ChatMessageRoleUser, Content: fmt.Sprintf("📄 NỘI DUNG TÀI LIỆU OCR:\n```\n%s\n```", ocrText)},
+	}
+
+	for _, turn := range history {
+		if turn.Question != "" {
+			messages = append(messages, openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleUser,
+				Content: turn.Question,
+			})
+		}
+		if turn.Answer != "" {
+			messages = append(messages, openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: turn.Answer,
+			})
+		}
+	}
+
+	messages = append(messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: fmt.Sprintf("❓ CÂU HỎI MỚI: %s", question),
+	})
 
 	resp, err := a.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model: a.model,
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
-			{Role: openai.ChatMessageRoleUser, Content: userMessage},
-		},
+		Model:       a.model,
+		Messages:    messages,
 		Temperature: a.qaTemperature,
 	})
 

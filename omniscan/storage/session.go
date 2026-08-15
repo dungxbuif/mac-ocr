@@ -9,6 +9,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type QAPair struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
 type ScanSession struct {
 	SessionID  string
 	UserID     string
@@ -17,12 +22,14 @@ type ScanSession struct {
 	OCRText    string
 	AskCount   int
 	CreatedAt  time.Time
+	History    []QAPair
 }
 
 type SessionStore interface {
 	CreateSession(sessionID, userID, documentID, docType, ocrText string) error
 	GetSession(sessionID string) (*ScanSession, error)
 	CheckAndIncrementAskQuota(sessionID, userID string, maxAsks int) (allowed bool, currentAsk int, err error)
+	AppendQAHistory(sessionID, question, answer string) error
 	DeleteSession(sessionID string) error
 	Close() error
 }
@@ -55,6 +62,13 @@ func NewSQLiteSessionStore(dbPath string) (*SQLiteSessionStore, error) {
 		updated_at DATETIME NOT NULL,
 		PRIMARY KEY (session_id, user_id)
 	);
+	CREATE TABLE IF NOT EXISTS session_qa_history (
+		session_id TEXT NOT NULL,
+		question TEXT NOT NULL,
+		answer TEXT NOT NULL,
+		created_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_session_qa_hist ON session_qa_history(session_id);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -91,12 +105,33 @@ func (s *SQLiteSessionStore) GetSession(sessionID string) (*ScanSession, error) 
 	} else if err != nil {
 		return nil, err
 	}
+
+	// Load Q&A history
+	rows, err := s.db.Query(`SELECT question, answer FROM session_qa_history WHERE session_id = ? ORDER BY created_at ASC`, sessionID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var pair QAPair
+			if err := rows.Scan(&pair.Question, &pair.Answer); err == nil {
+				sess.History = append(sess.History, pair)
+			}
+		}
+	}
+
 	return &sess, nil
 }
 
-// CheckAndIncrementAskQuota checks and increments the ask count for a specific user
-// on a given session. This allows other users in the channel to also ask questions
-// on a scanned document without exhausting or affecting the original owner's quota.
+func (s *SQLiteSessionStore) AppendQAHistory(sessionID, question, answer string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO session_qa_history (session_id, question, answer, created_at)
+		VALUES (?, ?, ?, ?)
+	`, sessionID, question, answer, time.Now())
+	return err
+}
+
 func (s *SQLiteSessionStore) CheckAndIncrementAskQuota(sessionID, userID string, maxAsks int) (bool, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -153,6 +188,7 @@ func (s *SQLiteSessionStore) DeleteSession(sessionID string) error {
 	defer s.mu.Unlock()
 
 	_, _ = s.db.Exec("DELETE FROM user_session_asks WHERE session_id = ?", sessionID)
+	_, _ = s.db.Exec("DELETE FROM session_qa_history WHERE session_id = ?", sessionID)
 	_, err := s.db.Exec("DELETE FROM scan_sessions WHERE session_id = ?", sessionID)
 	return err
 }
@@ -164,6 +200,7 @@ func (s *SQLiteSessionStore) startAutoCleanup(ttl time.Duration) {
 		cutoff := time.Now().Add(-ttl)
 		_, _ = s.db.Exec("DELETE FROM scan_sessions WHERE created_at < ?", cutoff)
 		_, _ = s.db.Exec("DELETE FROM user_session_asks WHERE updated_at < ?", cutoff)
+		_, _ = s.db.Exec("DELETE FROM session_qa_history WHERE created_at < ?", cutoff)
 		s.mu.Unlock()
 	}
 }

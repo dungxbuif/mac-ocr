@@ -400,17 +400,25 @@ func (b *OmniScanBot) handleThreadQuestion(channel *mezon.TextChannel, m *mezon.
 		ctx, cancel := context.WithTimeout(context.Background(), b.cfg.QATimeout)
 		defer cancel()
 
-		answer, err := b.agent.AnswerQuestion(ctx, s.OCRText, q)
+		var history []agent.QAPair
+		for _, h := range s.History {
+			history = append(history, agent.QAPair{Question: h.Question, Answer: h.Answer})
+		}
+
+		answer, err := b.agent.AnswerQuestion(ctx, s.OCRText, history, q)
 		if err != nil {
 			log.Printf("❌ Agent Q&A error: %v", err)
 			b.sendReply(channel, msg, fmt.Sprintf("❌ **Lỗi AI Agent:** %v", err))
 			return
 		}
 
+		_ = b.sessionStore.AppendQAHistory(s.SessionID, q, answer)
+
 		replyText := fmt.Sprintf("💡 **TRẢ LỜI (Câu %d/%d):**\n%s", currentAsk, userAskLimit, answer)
 		sentMsg, err := b.sendReply(channel, msg, replyText)
 		if err == nil && sentMsg != nil && sentMsg.ID != "" {
 			_ = b.sessionStore.CreateSession(sentMsg.ID, s.UserID, s.DocumentID, s.DocType, s.OCRText)
+			_ = b.sessionStore.AppendQAHistory(sentMsg.ID, q, answer)
 		}
 	}(m, sess, question, askCount, askLimit)
 }

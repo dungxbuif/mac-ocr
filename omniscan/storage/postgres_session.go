@@ -9,9 +9,7 @@ import (
 )
 
 // PostgresSessionStore implements SessionStore on top of PostgreSQL, keeping
-// Q&A context alive across multiple pods without sticky routing. No in-process
-// mutex is needed because PostgreSQL row-level locks guarantee safe concurrent
-// ask counting.
+// Q&A context alive across multiple pods without sticky routing.
 type PostgresSessionStore struct {
 	pool *pgxpool.Pool
 }
@@ -58,9 +56,16 @@ CREATE TABLE IF NOT EXISTS user_session_asks (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (session_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS session_qa_history (
+    session_id  TEXT NOT NULL,
+    question    TEXT NOT NULL,
+    answer      TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE INDEX IF NOT EXISTS idx_scan_sessions_user ON scan_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_scan_sessions_created ON scan_sessions(created_at);
 CREATE INDEX IF NOT EXISTS idx_user_session_asks_user ON user_session_asks(user_id);
+CREATE INDEX IF NOT EXISTS idx_session_qa_history ON session_qa_history(session_id);
 `
 
 func (s *PostgresSessionStore) migrate(ctx context.Context) error {
@@ -74,6 +79,10 @@ func (s *PostgresSessionStore) migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx,
 		`DELETE FROM user_session_asks WHERE updated_at < now() - INTERVAL '24 hours'`); err != nil {
 		return fmt.Errorf("sweep stale user asks: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM session_qa_history WHERE created_at < now() - INTERVAL '24 hours'`); err != nil {
+		return fmt.Errorf("sweep stale qa history: %w", err)
 	}
 	return nil
 }
@@ -105,12 +114,33 @@ func (s *PostgresSessionStore) GetSession(sessionID string) (*ScanSession, error
 	} else if err != nil {
 		return nil, err
 	}
+
+	// Load Q&A history
+	rows, err := s.pool.Query(ctx, `SELECT question, answer FROM session_qa_history WHERE session_id = $1 ORDER BY created_at ASC`, sessionID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var pair QAPair
+			if err := rows.Scan(&pair.Question, &pair.Answer); err == nil {
+				sess.History = append(sess.History, pair)
+			}
+		}
+	}
+
 	return &sess, nil
 }
 
-// CheckAndIncrementAskQuota checks and increments the ask count for the asking user
-// on a given session. This allows other users in the channel to also ask questions
-// without exhausting the original scanner's quota.
+func (s *PostgresSessionStore) AppendQAHistory(sessionID, question, answer string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO session_qa_history (session_id, question, answer, created_at)
+		VALUES ($1, $2, $3, now())
+	`, sessionID, question, answer)
+	return err
+}
+
 func (s *PostgresSessionStore) CheckAndIncrementAskQuota(sessionID, userID string, maxAsks int) (bool, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -166,6 +196,7 @@ func (s *PostgresSessionStore) DeleteSession(sessionID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, _ = s.pool.Exec(ctx, `DELETE FROM user_session_asks WHERE session_id = $1`, sessionID)
+	_, _ = s.pool.Exec(ctx, `DELETE FROM session_qa_history WHERE session_id = $1`, sessionID)
 	_, err := s.pool.Exec(ctx, `DELETE FROM scan_sessions WHERE session_id = $1`, sessionID)
 	return err
 }
