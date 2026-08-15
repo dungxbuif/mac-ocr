@@ -229,7 +229,7 @@ func BuildScanResult(docType, formatted string, currentCount, maxQuota, askLimit
 	}
 
 	buttons := mezon.NewButtonBuilder().
-		AddButton("omniscan_scan_more", "🔄 Scan tiếp", mezon.ButtonPrimary).
+		AddButton("omniscan_scan_detail", "📄 Văn bản gốc", mezon.ButtonPrimary).
 		AddButton("omniscan_quota", "📊 Lượt dùng", mezon.ButtonSecondary).
 		Build()
 

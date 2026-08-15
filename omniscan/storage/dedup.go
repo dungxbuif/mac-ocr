@@ -17,10 +17,10 @@ type RedisDeduplicator struct {
 	ttl    time.Duration
 }
 
-func NewRedisDeduplicator(client *redis.Client) *RedisDeduplicator {
+func NewRedisDeduplicator(client *redis.Client, ttl time.Duration) *RedisDeduplicator {
 	return &RedisDeduplicator{
 		client: client,
-		ttl:    10 * time.Minute,
+		ttl:    ttl,
 	}
 }
 
@@ -45,10 +45,10 @@ type InMemoryDeduplicator struct {
 	ttl  time.Duration
 }
 
-func NewInMemoryDeduplicator() *InMemoryDeduplicator {
+func NewInMemoryDeduplicator(ttl time.Duration) *InMemoryDeduplicator {
 	d := &InMemoryDeduplicator{
 		seen: make(map[string]time.Time),
-		ttl:  10 * time.Minute,
+		ttl:  ttl,
 	}
 	go d.cleanupLoop()
 	return d

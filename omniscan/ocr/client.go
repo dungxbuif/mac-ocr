@@ -14,9 +14,11 @@ import (
 )
 
 type Client struct {
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
+	baseURL      string
+	apiKey       string
+	httpClient   *http.Client
+	pollInterval time.Duration
+	pollTimeout  time.Duration
 }
 
 type SubmitResponse struct {
@@ -56,13 +58,18 @@ type ResultPayload struct {
 	Pages     []Page  `json:"pages,omitempty"`
 }
 
-func NewClient(baseURL, apiKey string) *Client {
+// NewClient builds an OCR proxy client. httpTimeout caps a single HTTP call,
+// pollInterval is the cadence between status checks, and pollTimeout is the
+// total budget for waiting on one document. All three must be > 0; they come
+// from env (OCR_HTTP_TIMEOUT, OCR_POLL_INTERVAL, OCR_POLL_TIMEOUT) so an
+// operator can tune for prod latency without a rebuild.
+func NewClient(baseURL, apiKey string, httpTimeout, pollInterval, pollTimeout time.Duration) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		apiKey:     apiKey,
+		httpClient: &http.Client{Timeout: httpTimeout},
+		pollInterval: pollInterval,
+		pollTimeout:  pollTimeout,
 	}
 }
 
@@ -111,17 +118,17 @@ func (c *Client) SubmitAndPollBase64Full(ctx context.Context, data []byte) (*Res
 
 // pollFull polls until the document is done and returns the full *ResultPayload.
 func (c *Client) pollFull(ctx context.Context, docID string) (*ResultPayload, error) {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
 
-	timeout := time.After(60 * time.Second)
+	timeout := time.After(c.pollTimeout)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-timeout:
-			return nil, errors.New("OCR processing timed out after 60 seconds")
+			return nil, fmt.Errorf("OCR processing timed out after %s", c.pollTimeout)
 		case <-ticker.C:
 			doc, err := c.GetDocument(ctx, docID)
 			if err != nil {

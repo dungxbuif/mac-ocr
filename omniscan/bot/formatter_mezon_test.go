@@ -75,7 +75,7 @@ func TestBuildScanResultContent_InvoiceShortProducesEmbedCard(t *testing.T) {
 		t.Fatalf("components must be 2 flat buttons, got %T %v", m["components"], m["components"])
 	}
 	for i, want := range []struct{ id, label string }{
-		{"omniscan_scan_more", "🔄 Scan tiếp"},
+		{"omniscan_scan_detail", "📄 Văn bản gốc"},
 		{"omniscan_quota", "📊 Lượt dùng"},
 	} {
 		if btns[i]["id"] != want.id {
@@ -145,7 +145,7 @@ func TestBuildScanResultContent_JSONRoundTripNoEscape(t *testing.T) {
 		t.Errorf("JSON should not HTML-escape: %s", out)
 	}
 	// Button wire: component nesting đúng.
-	if !strings.Contains(out, `"component":{"label":"🔄 Scan tiếp","style":1}`) {
+	if !strings.Contains(out, `"component":{"label":"📄 Văn bản gốc","style":1}`) {
 		t.Errorf("button component nesting missing: %s", out)
 	}
 	// embed title + footer presence.
@@ -163,14 +163,14 @@ func TestBuildScanResultContent_JSONRoundTripNoEscape(t *testing.T) {
 
 func TestBuildScanResultContent_IncludesButtonsEvenWhenNoBody(t *testing.T) {
 	btns := mezon.NewButtonBuilder().
-		AddButton("omniscan_scan_more", "🔄 Scan tiếp", mezon.ButtonPrimary).
+		AddButton("omniscan_scan_detail", "📄 Văn bản gốc", mezon.ButtonPrimary).
 		AddButton("omniscan_quota", "📊 Lượt dùng", mezon.ButtonSecondary).
 		Build()
 	if len(btns) != 2 {
 		t.Fatalf("expect 2 buttons in result")
 	}
 	comp, _ := btns[0]["component"].(map[string]any)
-	if comp["label"] != "🔄 Scan tiếp" {
+	if comp["label"] != "📄 Văn bản gốc" {
 		t.Errorf("first button label = %v", comp["label"])
 	}
 }

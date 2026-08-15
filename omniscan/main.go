@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	mezon "mezon-bot-sdk"
 
@@ -21,25 +20,28 @@ import (
 func main() {
 	log.Println("🚀 Starting OmniScan Mezon Bot Service...")
 
-	// Single-instance file lock protection. NOTE: this prevents two replicas
-	// on the same host. For true horizontal scaling across hosts, remove the
-	// flock and rely on PostgreSQL (quota/session) + Redis (dedup) instead.
-	lockFile, err := os.OpenFile("omniscan.lock", os.O_CREATE|os.O_RDWR, 0666)
-	if err != nil {
-		log.Fatalf("❌ Failed to open lock file: %v", err)
-	}
-	defer lockFile.Close()
-
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		log.Fatalf("🛑 Another instance of OmniScan bot is already running (lock active). Exiting to prevent duplicate replies.")
-	}
-	defer func() {
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	}()
-
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("❌ Failed to load config: %v", err)
+	}
+
+	// Single-host flock: prevents two replicas on the SAME host from replying
+	// to the same message. For multi-host horizontal scaling set
+	// SINGLE_HOST_LOCK=false and rely on PostgreSQL (quota/session source of
+	// truth) + Redis (cross-replica dedup) for safety instead.
+	if cfg.SingleHostLock {
+		lockFile, err := os.OpenFile("omniscan.lock", os.O_CREATE|os.O_RDWR, 0666)
+		if err != nil {
+			log.Fatalf("❌ Failed to open lock file: %v", err)
+		}
+		defer lockFile.Close()
+		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			log.Fatalf("🛑 Another instance of OmniScan bot is already running on this host (lock active). Set SINGLE_HOST_LOCK=false for multi-host. Exiting.")
+		}
+		defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
+		log.Printf("🔒 Single-host lock active (SINGLE_HOST_LOCK=true).")
+	} else {
+		log.Printf("🌐 Multi-host mode (SINGLE_HOST_LOCK=false) — rely on PostgreSQL + Redis for cross-host safety.")
 	}
 
 	var quotaStore storage.QuotaStore
@@ -72,25 +74,25 @@ func main() {
 		if err != nil {
 			log.Fatalf("❌ Failed to connect Redis: %v", err)
 		}
-		dedup = storage.NewRedisDeduplicator(redisStore.Client)
+		dedup = storage.NewRedisDeduplicator(redisStore.Client, cfg.DedupTTL)
 		sharedStore = storage.NewRedisSharedStore(redisStore.Client)
 		log.Println("✅ Redis Deduplicator & SDK L2 Shared Cache initialized!")
 	} else {
-		dedup = storage.NewInMemoryDeduplicator()
+		dedup = storage.NewInMemoryDeduplicator(cfg.DedupTTL)
 		log.Println("✅ In-Memory Deduplicator initialized (single-replica only).")
 	}
 	defer quotaStore.Close()
 	defer sessionStore.Close()
 
-	validator := security.NewValidator()
-	ocrClient := ocr.NewClient(cfg.OCRProxyURL, cfg.OCRAPIKey)
-	aiAgent := agent.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel)
+	validator := security.NewValidatorWithLimit(cfg.MaxAttachmentBytes)
+	ocrClient := ocr.NewClient(cfg.OCRProxyURL, cfg.OCRAPIKey, cfg.OCRHTTPTimeout, cfg.OCRPollInterval, cfg.OCRPollTimeout)
+	aiAgent := agent.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMScanTemperature, cfg.LLMQATemperature)
 
 	// Startup LLM probe: confirm the OpenAI-compatible endpoint is reachable and
 	// the key is valid before accepting *scan traffic. *ocr (raw) needs no LLM,
 	// so an unreachable LLM does NOT block start — we only warn loudly so the
 	// operator can fix the model server while raw OCR keeps working.
-	probeCtx, probeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), cfg.LLMHealthTimeout)
 	if err := aiAgent.Health(probeCtx); err != nil {
 		log.Printf("⚠️ LLM endpoint NOT reachable: %v", err)
 		log.Printf("⚠️ *scan (AI flow) will fail fast until the model server is up; *ocr (raw) still works.")

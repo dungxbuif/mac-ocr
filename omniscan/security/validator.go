@@ -21,10 +21,22 @@ var validExtensions = map[string]bool{
 	".pdf":  true,
 }
 
-type Validator struct{}
+type Validator struct {
+	maxAttachmentBytes int
+}
 
+// NewValidator returns a validator with the historical 100 MiB default. Tests
+// use this constructor. Production should call NewValidatorWithLimit so the
+// cap is sourced from MAX_ATTACHMENT_BYTES instead of being hardcoded.
 func NewValidator() *Validator {
-	return &Validator{}
+	return NewValidatorWithLimit(maxAttachmentBytes)
+}
+
+// NewValidatorWithLimit returns a validator whose attachment byte cap is the
+// caller's responsibility (config.MaxAttachmentBytes). ValidateAttachment
+// rejects files larger than this; ValidateURL stays independent of the cap.
+func NewValidatorWithLimit(maxBytes int) *Validator {
+	return &Validator{maxAttachmentBytes: maxBytes}
 }
 
 func (v *Validator) ValidateURL(rawURL string) error {
@@ -72,8 +84,11 @@ func (v *Validator) ValidateURL(rawURL string) error {
 }
 
 func (v *Validator) ValidateAttachment(filename string, sizeBytes int) error {
-	if sizeBytes > maxAttachmentBytes {
-		return fmt.Errorf("file size (%d bytes) exceeds maximum limit of 100 MiB", sizeBytes)
+	if v.maxAttachmentBytes <= 0 {
+		v.maxAttachmentBytes = maxAttachmentBytes
+	}
+	if sizeBytes > v.maxAttachmentBytes {
+		return fmt.Errorf("file size (%d bytes) exceeds maximum limit of %d bytes", sizeBytes, v.maxAttachmentBytes)
 	}
 
 	ext := strings.ToLower(filepath.Ext(filename))

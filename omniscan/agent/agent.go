@@ -9,8 +9,10 @@ import (
 )
 
 type Agent struct {
-	client *openai.Client
-	model  string
+	client        *openai.Client
+	model         string
+	scanTemperature float32
+	qaTemperature   float32
 }
 
 type ClassifyResult struct {
@@ -18,7 +20,10 @@ type ClassifyResult struct {
 	Formatted string
 }
 
-func New(baseURL, apiKey, model string) *Agent {
+// New builds an LLM agent. scanTemp and qaTemp are the sampling temperatures for
+// the *scan classify/format call and the Q&A call respectively, sourced from env
+// (LLM_SCAN_TEMPERATURE, LLM_QA_TEMPERATURE) so they can be tuned per deployment.
+func New(baseURL, apiKey, model string, scanTemp, qaTemp float32) *Agent {
 	cfg := openai.DefaultConfig(apiKey)
 	if baseURL != "" {
 		cfg.BaseURL = strings.TrimRight(baseURL, "/")
@@ -28,8 +33,10 @@ func New(baseURL, apiKey, model string) *Agent {
 	}
 
 	return &Agent{
-		client: openai.NewClientWithConfig(cfg),
-		model:  model,
+		client:          openai.NewClientWithConfig(cfg),
+		model:           model,
+		scanTemperature: scanTemp,
+		qaTemperature:   qaTemp,
 	}
 }
 
@@ -60,21 +67,31 @@ func (a *Agent) IsHealthy() bool { return healthy }
 // result. When customPrompt is non-empty it is appended to the system instructions
 // so the user can steer the output (e.g. "dịch ra tiếng Anh", "chỉ lấy số tiền").
 func (a *Agent) ClassifyAndFormat(ctx context.Context, ocrText, customPrompt string) (*ClassifyResult, error) {
-	systemPrompt := `Bạn là AI Agent trợ lý phân tích tài liệu chuyên nghiệp.
-Nhiệm vụ của bạn:
-1. Đọc văn bản OCR được cung cấp.
-2. Tự động nhận diện loại tài liệu:
-   - Hóa đơn / Biên lai (Invoice)
-   - Giấy tờ cá nhân / CCCD / Danh thiếp (ID Card / Business Card)
-   - Hợp đồng / Chứng từ pháp lý (Contract)
-   - Tài liệu kỹ thuật / Bài viết / Khác (General Document)
-3. Chỉnh sửa lỗi chính tả OCR, nối dòng văn bản bị ngắt quãng, loại bỏ rác.
-4. Trình bày lại kết quả dưới dạng Markdown đẹp mắt:
-   - Với Hóa đơn/CCCD: Dùng bảng Markdown (Table) trích xuất rõ các trường thông tin.
-   - Với Hợp đồng: Tóm tắt các điều khoản chính, số tiền, mốc thời gian.
-   - Với Tài liệu chung: Định dạng bài viết chuẩn với tiêu đề (#, ##) và các mục rõ ràng.
+	systemPrompt := `Bạn là OmniScan — trợ lý AI phân tích tài liệu chuyên nghiệp.
+Nhiệm vụ KHÔNG phải copy lại văn bản OCR, mà là ĐỌC HIỂU, trích xuất thông tin trọng yếu và phân tích rủi ro/hành động.
 
-Hãy bắt đầu bằng dòng đầu tiên chỉ ghi tên loại tài liệu trong ngoặc vuông, ví dụ: [Hóa đơn] hoặc [Hợp đồng] hoặc [CCCD] hoặc [Tài liệu chung], sau đó trình bày chi tiết.`
+BƯỚC 1 — Nhận diện loại tài liệu, ghi ở dòng ĐẦU TIÊN chỉ tên trong ngoặc vuông, một trong:
+[Hóa đơn] | [CCCD/Danh thiếp] | [Hợp đồng] | [Tài liệu kỹ thuật] | [Bài viết] | [Bảng biểu] | [Khác]
+
+BƯỚC 2 — Trình bày kết quả theo ĐÚNG 4 PHẦN với tiêu đề Markdown (bắt buộc, không bỏ phần nào, giữ thứ tự):
+
+## 📌 Tóm tắt nhanh
+2-4 câu ngắn gọn (TL;DR): tài liệu là gì, bên nào với bên nào, trị giá/mục đích, thời hạn cốt lõi. Người đọc chỉ cần 3 giây để nắm bức tranh tổng quát.
+
+## 📊 Thông tin quan trọng
+Bảng Markdown (| Trường | Giá trị |) liệt kê mọi thực thể/dữ liệu chính: bên A, bên B, MST, số tiền, ngày ký, ngày hiệu lực, đợt thanh toán, ký hạn, điều khoản then chốt. Với CCCD/danh thiếp: họ tên, ngày sinh, số CMND/CCCD, nơi cấp, giới hạn. Với bài viết/bảng biểu: tiêu đề + các điểm số liệu chính.
+
+## ⚠️ Điểm cần lưu ý & Rủi ro
+Liệt kê (dùng "- ") các điểm cần chú ý: điều khoản phạt, đơn phương chấm dứt, bảo hành, bảo mật, tính hợp lệ, mâu thuẫn số liệu, rủi ro pháp lý/tài chính. Nếu KHÔNG có rủi ro rõ rệt, ghi: "Không phát hiện rủi ro nổi bật ngoài các điều khoản tiêu chuẩn."
+
+## 💡 Bạn có thể hỏi thêm
+Đưa ra đúng 3 câu hỏi gợi ý (đánh số 1. 2. 3.), gắn trực tiếp với nội dung tài liệu để giúp người dùng khai thác nhanh. Ví dụ: "Bên A có quyền đơn phương hủy hợp đồng không?", "Tổng tiền đã thanh toán theo hợp đồng là bao nhiêu?"
+
+NGUYÊN TẮC:
+- KHÔNG copy lại toàn bộ nội dung — trích xuất và phân tích.
+- Sửa lỗi chính tả OCR, nối dòng bị ngắt, bỏ rác/ký tự thừa.
+- Viết bằng tiếng Việt, ngắn gọn, súc tích, đúng trọng tâm.
+- Loại tài liệu phải ở dòng 1, trước 4 phần.`
 
 	// Append user-supplied prompt override (e.g. "dịch ra tiếng Anh")
 	if strings.TrimSpace(customPrompt) != "" {
@@ -85,9 +102,9 @@ Hãy bắt đầu bằng dòng đầu tiên chỉ ghi tên loại tài liệu tr
 		Model: a.model,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
-			{Role: openai.ChatMessageRoleUser, Content: "Dưới đây là văn bản OCR cần bóc tách và phân loại:\n\n" + ocrText},
+			{Role: openai.ChatMessageRoleUser, Content: "Dưới đây là văn bản OCR cần phân tích:\n\n" + ocrText},
 		},
-		Temperature: 0.2,
+		Temperature: a.scanTemperature,
 	})
 
 	if err != nil {
@@ -130,7 +147,7 @@ Dựa TRỰC TIẾP và CHÍNH XÁC vào nội dung tài liệu OCR được cun
 			{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
 			{Role: openai.ChatMessageRoleUser, Content: userMessage},
 		},
-		Temperature: 0.3,
+		Temperature: a.qaTemperature,
 	})
 
 	if err != nil {

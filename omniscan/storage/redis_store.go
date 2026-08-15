@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -176,107 +175,4 @@ func (s *RedisSharedStore) Set(ctx context.Context, key string, value []byte, tt
 
 func (s *RedisSharedStore) Delete(ctx context.Context, key string) error {
 	return s.client.Del(ctx, key).Err()
-}
-
-// RedisSessionStore for multi-replica distributed scan sessions
-type RedisSessionStore struct {
-	client *redis.Client
-	ttl    time.Duration
-}
-
-func NewRedisSessionStore(client *redis.Client) *RedisSessionStore {
-	return &RedisSessionStore{
-		client: client,
-		ttl:    24 * time.Hour,
-	}
-}
-
-func (s *RedisSessionStore) CreateSession(sessionID, userID, documentID, docType, ocrText string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	sess := ScanSession{
-		SessionID:  sessionID,
-		UserID:     userID,
-		DocumentID: documentID,
-		DocType:    docType,
-		OCRText:    ocrText,
-		AskCount:   0,
-		CreatedAt:  time.Now(),
-	}
-
-	b, err := json.Marshal(sess)
-	if err != nil {
-		return err
-	}
-
-	key := "omniscan:session:" + sessionID
-	return s.client.Set(ctx, key, b, s.ttl).Err()
-}
-
-func (s *RedisSessionStore) GetSession(sessionID string) (*ScanSession, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	key := "omniscan:session:" + sessionID
-	b, err := s.client.Get(ctx, key).Bytes()
-	if err == redis.Nil {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-
-	var sess ScanSession
-	if err := json.Unmarshal(b, &sess); err != nil {
-		return nil, err
-	}
-
-	return &sess, nil
-}
-
-func (s *RedisSessionStore) CheckAndIncrementAskQuota(sessionID string, maxAsks int) (bool, int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	key := "omniscan:session:" + sessionID
-	b, err := s.client.Get(ctx, key).Bytes()
-	if err == redis.Nil {
-		return false, 0, nil
-	} else if err != nil {
-		return false, 0, err
-	}
-
-	var sess ScanSession
-	if err := json.Unmarshal(b, &sess); err != nil {
-		return false, 0, err
-	}
-
-	if sess.AskCount >= maxAsks {
-		_ = s.client.Del(ctx, key).Err() // Auto purge on max ask limit reached
-		return false, sess.AskCount, nil
-	}
-
-	sess.AskCount++
-	newB, err := json.Marshal(sess)
-	if err != nil {
-		return false, 0, err
-	}
-
-	if err := s.client.Set(ctx, key, newB, s.ttl).Err(); err != nil {
-		return false, 0, err
-	}
-
-	return true, sess.AskCount, nil
-}
-
-func (s *RedisSessionStore) DeleteSession(sessionID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	key := "omniscan:session:" + sessionID
-	return s.client.Del(ctx, key).Err()
-}
-
-func (s *RedisSessionStore) Close() error {
-	return nil
 }

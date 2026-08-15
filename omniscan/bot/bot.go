@@ -28,6 +28,7 @@ type OmniScanBot struct {
 	dedup        storage.Deduplicator
 	cfg          *config.Config
 	pgQuota      *storage.PostgresQuotaStore // nil when not on PostgreSQL
+	limits       *userLimitCache             // TTL cache for per-user limits
 }
 
 func New(cfg *config.Config, ocrClient *ocrlib.Client, store storage.QuotaStore, sessionStore storage.SessionStore, validator *security.Validator, agent *agent.Agent, dedup storage.Deduplicator, sharedStore mezon.SharedStore, pgQuota *storage.PostgresQuotaStore) (*OmniScanBot, error) {
@@ -38,7 +39,7 @@ func New(cfg *config.Config, ocrClient *ocrlib.Client, store storage.QuotaStore,
 		Host:    cfg.MezonHost,
 		Port:    cfg.MezonPort,
 		UseSSL:  &useSSL,
-		Timeout: 10 * time.Second,
+		Timeout: cfg.MezonClientTimeout,
 		Store:   sharedStore,
 	}
 
@@ -57,6 +58,7 @@ func New(cfg *config.Config, ocrClient *ocrlib.Client, store storage.QuotaStore,
 		dedup:        dedup,
 		cfg:          cfg,
 		pgQuota:      pgQuota,
+		limits:       newUserLimitCache(cfg.UserLimitCacheTTL),
 	}
 
 	b.setupHandlers()
@@ -150,7 +152,7 @@ func (b *OmniScanBot) setupHandlers() {
 
 		// Quota command
 		if lowerText == "*quota" || lowerText == "*me" {
-			scanLimit, ocrLimit, askLimit, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
+			scanLimit, ocrLimit, askLimit := b.getUserLimits(m.SenderID)
 			scanUsed, scanRem, ocrUsed, ocrRem, err := b.store.GetQuota(m.SenderID, scanLimit, ocrLimit)
 			if err != nil {
 				log.Printf("❌ Quota lookup error: %v", err)
@@ -213,7 +215,7 @@ func (b *OmniScanBot) setupHandlers() {
 		}
 
 		// Dynamically fetch user-specific limits from DB (auto-provisions defaults on first encounter)
-		scanLimit, ocrLimit, _, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
+		scanLimit, ocrLimit, _ := b.getUserLimits(m.SenderID)
 
 		var allowed bool
 		var currentCount int
@@ -241,11 +243,11 @@ func (b *OmniScanBot) setupHandlers() {
 
 		if isOCRCmd {
 			// Raw OCR flow — uses SubmitAndPollFull so we get bbox blocks for 2D layout
-			log.Printf("🔍 [Raw OCR %d/%d] Processing for %s (URL: %s)", currentCount, scanLimit, sender, targetURL)
-			b.sendReply(channel, m, fmt.Sprintf("⏳ Đang bóc tách OCR (Lượt %d/%d), vui lòng chờ...", currentCount, scanLimit))
+			log.Printf("🔍 [Raw OCR %d/%d] Processing for %s (URL: %s)", currentCount, ocrLimit, sender, targetURL)
+			b.sendReply(channel, m, fmt.Sprintf("⏳ Đang bóc tách OCR (Lượt %d/%d), vui lòng chờ...", currentCount, ocrLimit))
 
 			go func(msg *mezon.ChannelMessage, urlToScan, userID string, asAttachment bool) {
-				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), b.cfg.OCRProcessTimeout)
 				defer cancel()
 
 				result, err := b.submitOCRFull(ctx, urlToScan, asAttachment)
@@ -257,7 +259,7 @@ func (b *OmniScanBot) setupHandlers() {
 				}
 
 				reconstructed := ocrlib.ReconstructLayout(result)
-				out := BuildOCRResult(result, reconstructed, currentCount, scanLimit)
+				out := BuildOCRResult(result, reconstructed, currentCount, ocrLimit)
 
 				// Deliver embed card
 				sentMsg, sendErr := b.sendReplyContent(channel, msg, out.Content)
@@ -291,7 +293,7 @@ func (b *OmniScanBot) setupHandlers() {
 		b.sendReply(channel, m, fmt.Sprintf("⏳ 🧠 AI đang phân tích tài liệu (Lượt %d/%d)%s, vui lòng chờ...", currentCount, scanLimit, promptHint))
 
 		go func(msg *mezon.ChannelMessage, urlToScan, userID, prompt string, asAttachment bool) {
-			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), b.cfg.ScanProcessTimeout)
 			defer cancel()
 
 			// Full result for bbox reconstruction
@@ -304,7 +306,7 @@ func (b *OmniScanBot) setupHandlers() {
 			}
 			reconstructed := ocrlib.ReconstructLayout(result)
 
-			_, _, askLimit, _ := b.store.GetOrCreateUserConfig(userID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
+			_, _, askLimit := b.getUserLimits(userID)
 
 			// Call LLM with optional custom prompt
 			res, err := b.agent.ClassifyAndFormat(ctx, reconstructed, prompt)
@@ -335,7 +337,7 @@ func (b *OmniScanBot) setupHandlers() {
 }
 
 func (b *OmniScanBot) handleThreadQuestion(channel *mezon.TextChannel, m *mezon.ChannelMessage, sess *storage.ScanSession, question string) {
-	_, _, askLimit, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
+	_, _, askLimit := b.getUserLimits(m.SenderID)
 	allowed, askCount, err := b.sessionStore.CheckAndIncrementAskQuota(sess.SessionID, askLimit)
 	if err != nil {
 		log.Printf("❌ Ask quota error: %v", err)
@@ -351,7 +353,7 @@ func (b *OmniScanBot) handleThreadQuestion(channel *mezon.TextChannel, m *mezon.
 	b.sendReply(channel, m, fmt.Sprintf("💭 🧠 AI đang suy nghĩ câu trả lời (Câu %d/%d)...", askCount, askLimit))
 
 	go func(msg *mezon.ChannelMessage, s *storage.ScanSession, q string, currentAsk, userAskLimit int) {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), b.cfg.QATimeout)
 		defer cancel()
 
 		answer, err := b.agent.AnswerQuestion(ctx, s.OCRText, q)
@@ -390,13 +392,17 @@ func (b *OmniScanBot) handleButtonClicked(e *mezon.MessageButtonClick) {
 	}
 	switch e.ButtonID {
 	case "omniscan_quota":
-		scanLimit, ocrLimit, askLimit, _ := b.store.GetOrCreateUserConfig(e.SenderID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
+		scanLimit, ocrLimit, askLimit := b.getUserLimits(e.SenderID)
 		scanUsed, scanRem, ocrUsed, ocrRem, qerr := b.store.GetQuota(e.SenderID, scanLimit, ocrLimit)
 		if qerr != nil {
 			b.sendText(channel, e.SenderID, "⚠️ Có lỗi xảy ra khi kiểm tra lượt dùng.")
 			return
 		}
 		b.sendText(channel, e.SenderID, FormatQuotaMessage(scanUsed, scanLimit, scanRem, ocrUsed, ocrLimit, ocrRem, askLimit))
+	case "omniscan_scan_detail":
+		b.handleScanDetailButton(channel, e)
+	case "omniscan_scan_more":
+		b.handleScanMoreButton(channel, e)
 	case "omniscan_scan_hint":
 		b.sendText(channel, e.SenderID, "💡 Gửi `*scan <url>` hoặc đính kèm ảnh/PDF kèm `*scan`. AI sẽ tự nhận diện & định dạng Markdown.")
 	default:
@@ -517,7 +523,7 @@ func (b *OmniScanBot) sendFileAttachment(channel *mezon.TextChannel, _ *mezon.Ch
 // transient 404 (edge node not synced yet at the instant the bot receives the
 // upload event), so the download is retried with backoff.
 func (b *OmniScanBot) downloadAttachmentBytes(ctx context.Context, url string) ([]byte, error) {
-	const maxBytes = 100 * 1024 * 1024 // 100 MiB, matches security.Validator
+	maxBytes := b.cfg.MaxAttachmentBytes
 	backoffs := []time.Duration{1 * time.Second, 3 * time.Second, 6 * time.Second}
 
 	var lastErr error
@@ -552,14 +558,14 @@ func (b *OmniScanBot) downloadAttachmentBytes(ctx context.Context, url string) (
 			continue
 		}
 
-		r := io.LimitReader(resp.Body, maxBytes+1)
+		r := io.LimitReader(resp.Body, int64(maxBytes)+1)
 		data, err := io.ReadAll(r)
 		resp.Body.Close()
 		if err != nil {
 			return nil, err
 		}
 		if len(data) > maxBytes {
-			return nil, fmt.Errorf("download %s: exceeds 100 MiB limit", url)
+			return nil, fmt.Errorf("download %s: exceeds %d bytes limit", url, maxBytes)
 		}
 		if attempt > 0 {
 			log.Printf("✅ [download] succeeded on retry %d", attempt)
