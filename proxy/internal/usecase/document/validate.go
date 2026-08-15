@@ -131,10 +131,10 @@ func ValidateFile(data []byte, contentType string) error {
 			return fmt.Errorf("%w: PDF is truncated or missing EOF marker", domain.ErrFileValidation)
 		}
 		lower := bytes.ToLower(data)
-		blocked := [][]byte{[]byte("/encrypt"), []byte("/javascript"), []byte("/js "), []byte("/launch"), []byte("/embeddedfile"), []byte("/openaction"), []byte("/aa ")}
+		blocked := [][]byte{[]byte("/javascript"), []byte("/launch")}
 		for _, marker := range blocked {
 			if bytes.Contains(lower, marker) {
-				return fmt.Errorf("%w: PDF contains unsupported active or encrypted content", domain.ErrFileValidation)
+				return fmt.Errorf("%w: PDF contains unsupported active content", domain.ErrFileValidation)
 			}
 		}
 		pdfConfigOnce.Do(api.DisableConfigDir)
