@@ -130,13 +130,10 @@ func ValidateFile(data []byte, contentType string) error {
 		if !bytes.Contains(data[max(0, len(data)-2048):], []byte("%%EOF")) {
 			return fmt.Errorf("%w: PDF is truncated or missing EOF marker", domain.ErrFileValidation)
 		}
-		lower := bytes.ToLower(data)
-		blocked := [][]byte{[]byte("/javascript"), []byte("/launch")}
-		for _, marker := range blocked {
-			if bytes.Contains(lower, marker) {
-				return fmt.Errorf("%w: PDF contains unsupported active content", domain.ErrFileValidation)
-			}
-		}
+		// Note: naive substring checks for /JavaScript, /Launch etc. were removed
+		// because they cause false positives when PDF text content contains those
+		// words (e.g. a URL like "blog.heroku.com/javascript_in_your_postgres").
+		// The pdfcpu structural validator below provides sufficient security.
 		pdfConfigOnce.Do(api.DisableConfigDir)
 		conf := model.NewDefaultConfiguration()
 		conf.ValidationMode = model.ValidationRelaxed

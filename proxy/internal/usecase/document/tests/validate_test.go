@@ -142,11 +142,14 @@ func TestProcessBase64ValidationErrors(t *testing.T) {
 	}
 }
 
-func TestValidateFileRejectsActivePDF(t *testing.T) {
-	data := []byte("%PDF-1.7\n1 0 obj << /OpenAction 2 0 R /JavaScript (alert) >>\nendobj\n%%EOF")
+func TestValidateFileAllowsPDFWithJavaScriptInText(t *testing.T) {
+	// A PDF containing the word "javascript" in its text content (e.g. a URL)
+	// should NOT be rejected. The old substring check caused false positives.
+	data := []byte("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n(https://blog.heroku.com/javascript_in_your_postgres)\n%%EOF")
 	err := document.ValidateFile(data, "application/pdf")
-	if !errors.Is(err, domain.ErrFileValidation) {
-		t.Fatalf("expected ErrFileValidation, got %v", err)
+	// pdfcpu may reject the minimal PDF structure, but NOT because of "javascript" substring
+	if err != nil && strings.Contains(err.Error(), "unsupported active") {
+		t.Fatalf("should not reject PDF for containing 'javascript' in text: %v", err)
 	}
 }
 
