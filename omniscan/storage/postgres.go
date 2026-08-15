@@ -44,15 +44,17 @@ func NewPostgresQuotaStore(ctx context.Context, databaseURL string) (*PostgresQu
 
 const pgSchema = `
 CREATE TABLE IF NOT EXISTS user_daily_scans (
-    user_id   TEXT NOT NULL,
-    scan_date DATE NOT NULL,
-    count     INTEGER NOT NULL DEFAULT 0,
+    user_id    TEXT NOT NULL,
+    scan_date  DATE NOT NULL,
+    scan_count INTEGER NOT NULL DEFAULT 0,
+    ocr_count  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, scan_date)
 );
 
 CREATE TABLE IF NOT EXISTS user_configs (
     user_id           TEXT PRIMARY KEY,
     daily_scan_limit  INTEGER NOT NULL,
+    daily_ocr_limit   INTEGER NOT NULL,
     session_ask_limit INTEGER NOT NULL,
     display_name      TEXT NOT NULL DEFAULT '',
     username          TEXT NOT NULL DEFAULT '',
@@ -71,6 +73,21 @@ func (s *PostgresQuotaStore) migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, pgSchema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
+	// Upgrade from the old single-counter schema. ADD COLUMN IF NOT EXISTS
+	// is idempotent and never errors on the new shape; mirroring it back to
+	// the legacy `count` is impossible (Postgres has no RENAME IF EXISTS),
+	// so we leave `count` behind and copy its value once for today's rows.
+	migrations := []string{
+		`ALTER TABLE user_daily_scans ADD COLUMN IF NOT EXISTS scan_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE user_daily_scans ADD COLUMN IF NOT EXISTS ocr_count  INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS daily_ocr_limit   INTEGER NOT NULL DEFAULT 5`,
+		`UPDATE user_daily_scans SET scan_count = count WHERE scan_count = 0 AND count > 0`,
+	}
+	for _, q := range migrations {
+		if _, err := s.pool.Exec(ctx, q); err != nil {
+			return fmt.Errorf("migrate split counters: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -78,11 +95,11 @@ func (s *PostgresQuotaStore) migrate(ctx context.Context) error {
 // of an event-driven upsert. On first sight it seeds the limits from the
 // defaults; on later sights it only bumps seen_count/last_seen and refreshes
 // the display fields, so an admin's customised limit is never overwritten.
-func (s *PostgresQuotaStore) UpsertUser(ctx context.Context, userID, displayName, username, clanNick string, defaultScanLimit, defaultAskLimit int) error {
+func (s *PostgresQuotaStore) UpsertUser(ctx context.Context, userID, displayName, username, clanNick string, defScan, defOCR, defAsk int) error {
 	const q = `
 	INSERT INTO user_configs
-	    (user_id, daily_scan_limit, session_ask_limit, display_name, username, clan_nick, seen_count, last_seen_at, created_at, updated_at)
-	VALUES ($1, $2, $3, $4, $5, $6, 1, now(), now(), now())
+	    (user_id, daily_scan_limit, daily_ocr_limit, session_ask_limit, display_name, username, clan_nick, seen_count, last_seen_at, created_at, updated_at)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, 1, now(), now(), now())
 	ON CONFLICT (user_id) DO UPDATE SET
 	    display_name = EXCLUDED.display_name,
 	    username     = EXCLUDED.username,
@@ -91,44 +108,44 @@ func (s *PostgresQuotaStore) UpsertUser(ctx context.Context, userID, displayName
 	    last_seen_at = now(),
 	    updated_at   = now()
 	`
-	_, err := s.pool.Exec(ctx, q, userID, defaultScanLimit, defaultAskLimit, displayName, username, clanNick)
+	_, err := s.pool.Exec(ctx, q, userID, defScan, defOCR, defAsk, displayName, username, clanNick)
 	return err
 }
 
-func (s *PostgresQuotaStore) GetOrCreateUserConfig(userID string, defaultScanLimit, defaultAskLimit int) (int, int, error) {
+func (s *PostgresQuotaStore) GetOrCreateUserConfig(userID string, defScan, defOCR, defAsk int) (int, int, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	var scanLimit, askLimit int
+	var scanLimit, ocrLimit, askLimit int
 	err := s.pool.QueryRow(ctx,
-		`SELECT daily_scan_limit, session_ask_limit FROM user_configs WHERE user_id = $1`,
-		userID).Scan(&scanLimit, &askLimit)
+		`SELECT daily_scan_limit, daily_ocr_limit, session_ask_limit FROM user_configs WHERE user_id = $1`,
+		userID).Scan(&scanLimit, &ocrLimit, &askLimit)
 	if err == nil {
-		return scanLimit, askLimit, nil
+		return scanLimit, ocrLimit, askLimit, nil
 	}
 	if !isNoRows(err) {
-		return defaultScanLimit, defaultAskLimit, err
+		return defScan, defOCR, defAsk, err
 	}
 
 	// First sight via the legacy GetOrCreate path: seed defaults. The
 	// event-driven UpsertUser is the preferred entry point, but keep this
 	// self-healing so a config miss never blocks a scan.
 	_, err = s.pool.Exec(ctx, `
-		INSERT INTO user_configs (user_id, daily_scan_limit, session_ask_limit, created_at, updated_at)
-		VALUES ($1, $2, $3, now(), now())
+		INSERT INTO user_configs (user_id, daily_scan_limit, daily_ocr_limit, session_ask_limit, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, now(), now())
 		ON CONFLICT (user_id) DO NOTHING
-	`, userID, defaultScanLimit, defaultAskLimit)
+	`, userID, defScan, defOCR, defAsk)
 	if err != nil {
-		return defaultScanLimit, defaultAskLimit, err
+		return defScan, defOCR, defAsk, err
 	}
-	return defaultScanLimit, defaultAskLimit, nil
+	return defScan, defOCR, defAsk, nil
 }
 
-// CheckAndIncrementQuota atomically bumps the daily counter, returning whether
-// the scan is allowed and the new count. The FOR UPDATE lock guards against
-// two replicas racing the same user in the same transaction window; the
+// checkAndIncrement is the shared implementation for the *scan and *ocr
+// daily counters; `column` selects which to bump. The FOR UPDATE lock
+// guards against two replicas racing the same user in the same window; the
 // INSERT ... ON CONFLICT upserts the row for a brand-new day.
-func (s *PostgresQuotaStore) CheckAndIncrementQuota(userID string, dailyLimit int) (bool, int, error) {
+func (s *PostgresQuotaStore) checkAndIncrement(userID, column string, dailyLimit int) (bool, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -139,8 +156,8 @@ func (s *PostgresQuotaStore) CheckAndIncrementQuota(userID string, dailyLimit in
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO user_daily_scans (user_id, scan_date, count)
-		VALUES ($1, CURRENT_DATE, 0)
+		INSERT INTO user_daily_scans (user_id, scan_date, scan_count, ocr_count)
+		VALUES ($1, CURRENT_DATE, 0, 0)
 		ON CONFLICT (user_id, scan_date) DO NOTHING
 	`, userID); err != nil {
 		return false, 0, err
@@ -148,7 +165,7 @@ func (s *PostgresQuotaStore) CheckAndIncrementQuota(userID string, dailyLimit in
 
 	var currentCount int
 	if err := tx.QueryRow(ctx, `
-		SELECT count FROM user_daily_scans WHERE user_id = $1 AND scan_date = CURRENT_DATE FOR UPDATE
+		SELECT `+column+` FROM user_daily_scans WHERE user_id = $1 AND scan_date = CURRENT_DATE FOR UPDATE
 	`, userID).Scan(&currentCount); err != nil {
 		return false, 0, err
 	}
@@ -159,7 +176,7 @@ func (s *PostgresQuotaStore) CheckAndIncrementQuota(userID string, dailyLimit in
 
 	newCount := currentCount + 1
 	if _, err := tx.Exec(ctx, `
-		UPDATE user_daily_scans SET count = $2 WHERE user_id = $1 AND scan_date = CURRENT_DATE
+		UPDATE user_daily_scans SET `+column+` = $2 WHERE user_id = $1 AND scan_date = CURRENT_DATE
 	`, userID, newCount); err != nil {
 		return false, 0, err
 	}
@@ -170,36 +187,56 @@ func (s *PostgresQuotaStore) CheckAndIncrementQuota(userID string, dailyLimit in
 	return true, newCount, nil
 }
 
-func (s *PostgresQuotaStore) GetQuota(userID string, dailyLimit int) (int, int, error) {
+func (s *PostgresQuotaStore) CheckAndIncrementScanQuota(userID string, dailyLimit int) (bool, int, error) {
+	return s.checkAndIncrement(userID, "scan_count", dailyLimit)
+}
+
+func (s *PostgresQuotaStore) CheckAndIncrementOCRQuota(userID string, dailyLimit int) (bool, int, error) {
+	return s.checkAndIncrement(userID, "ocr_count", dailyLimit)
+}
+
+func (s *PostgresQuotaStore) GetQuota(userID string, scanLimit, ocrLimit int) (int, int, int, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	var count int
+	var scanCount, ocrCount int
 	err := s.pool.QueryRow(ctx,
-		`SELECT count FROM user_daily_scans WHERE user_id = $1 AND scan_date = CURRENT_DATE`,
-		userID).Scan(&count)
+		`SELECT scan_count, ocr_count FROM user_daily_scans WHERE user_id = $1 AND scan_date = CURRENT_DATE`,
+		userID).Scan(&scanCount, &ocrCount)
 	if isNoRows(err) {
-		return 0, dailyLimit, nil
+		return 0, scanLimit, 0, ocrLimit, nil
 	} else if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 
-	remaining := dailyLimit - count
-	if remaining < 0 {
-		remaining = 0
+	scanRem := scanLimit - scanCount
+	ocrRem := ocrLimit - ocrCount
+	if scanRem < 0 {
+		scanRem = 0
 	}
-	return count, remaining, nil
+	if ocrRem < 0 {
+		ocrRem = 0
+	}
+	return scanCount, scanRem, ocrCount, ocrRem, nil
 }
 
-func (s *PostgresQuotaStore) RefundQuota(userID string) error {
+func (s *PostgresQuotaStore) refundOne(userID, column string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	_, err := s.pool.Exec(ctx, `
-		UPDATE user_daily_scans SET count = GREATEST(0, count - 1)
+		UPDATE user_daily_scans SET `+column+` = GREATEST(0, `+column+` - 1)
 		WHERE user_id = $1 AND scan_date = CURRENT_DATE
 	`, userID)
 	return err
+}
+
+func (s *PostgresQuotaStore) RefundScanQuota(userID string) error {
+	return s.refundOne(userID, "scan_count")
+}
+
+func (s *PostgresQuotaStore) RefundOCRQuota(userID string) error {
+	return s.refundOne(userID, "ocr_count")
 }
 
 func (s *PostgresQuotaStore) Close() error {

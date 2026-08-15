@@ -3,7 +3,9 @@ package bot
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -11,14 +13,14 @@ import (
 
 	"omniscan/agent"
 	"omniscan/config"
-	"omniscan/ocr"
+	ocrlib "omniscan/ocr"
 	"omniscan/security"
 	"omniscan/storage"
 )
 
 type OmniScanBot struct {
 	client       *mezon.MezonClient
-	ocrClient    *ocr.Client
+	ocrClient    *ocrlib.Client
 	store        storage.QuotaStore
 	sessionStore storage.SessionStore
 	validator    *security.Validator
@@ -28,7 +30,7 @@ type OmniScanBot struct {
 	pgQuota      *storage.PostgresQuotaStore // nil when not on PostgreSQL
 }
 
-func New(cfg *config.Config, ocrClient *ocr.Client, store storage.QuotaStore, sessionStore storage.SessionStore, validator *security.Validator, agent *agent.Agent, dedup storage.Deduplicator, sharedStore mezon.SharedStore, pgQuota *storage.PostgresQuotaStore) (*OmniScanBot, error) {
+func New(cfg *config.Config, ocrClient *ocrlib.Client, store storage.QuotaStore, sessionStore storage.SessionStore, validator *security.Validator, agent *agent.Agent, dedup storage.Deduplicator, sharedStore mezon.SharedStore, pgQuota *storage.PostgresQuotaStore) (*OmniScanBot, error) {
 	useSSL := true
 	clientCfg := mezon.ClientConfig{
 		BotID:   cfg.MezonBotID,
@@ -121,33 +123,41 @@ func (b *OmniScanBot) setupHandlers() {
 		// leading command prefix ("*") marks a real command, not a follow-up
 		// question, so route it to the command dispatcher instead.
 		if len(m.References) > 0 && text != "" && !strings.HasPrefix(text, "*") {
-			refMsgID := m.References[0].MessageID
+			refMsgID := m.RefMessageID()
 			sess, err := b.sessionStore.GetSession(refMsgID)
-			if err == nil && sess != nil {
+			if err != nil {
+				log.Printf("⚠️ [Reply] session lookup error for ref %s: %v", refMsgID, err)
+			}
+			if sess != nil {
 				b.handleThreadQuestion(channel, m, sess, text)
 				return
 			}
+			// Reply to a message that has no Q&A session (too old, or never
+			// scanned). Tell the user instead of silently ignoring them.
+			log.Printf("📩 [Reply] no session for ref %s — not a scan result", refMsgID)
+			b.sendReply(channel, m, "⚠️ Tin nhắn này không có phiên hỏi đáp. Hãy `*scan` hoặc `*ocr` một tài liệu mới, rồi **reply** tin nhắn kết quả để hỏi AI.")
+			return
 		}
 
 		lowerText := strings.ToLower(text)
 
-		// Help command: prefix-independent name to avoid clashing with other
-		// bots that use the common *help. Trigger on bare "*os" or "*os help".
-		if lowerText == "*os" || lowerText == "*os help" || lowerText == "*os -h" {
-			b.sendReplyContent(channel, m, BuildHelpContent(b.cfg.DailyScanLimit, b.cfg.SessionAskLimit))
+		// Help command. Trigger on bare "*os" or "*omniscan" — short, memorable,
+		// and distinct from other bots' *help. No "help" subword needed.
+		if lowerText == "*os" || lowerText == "*omniscan" {
+			b.sendReplyContent(channel, m, BuildHelpContent(b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit))
 			return
 		}
 
 		// Quota command
 		if lowerText == "*quota" || lowerText == "*me" {
-			scanLimit, askLimit, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.SessionAskLimit)
-			used, remaining, err := b.store.GetQuota(m.SenderID, scanLimit)
+			scanLimit, ocrLimit, askLimit, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
+			scanUsed, scanRem, ocrUsed, ocrRem, err := b.store.GetQuota(m.SenderID, scanLimit, ocrLimit)
 			if err != nil {
 				log.Printf("❌ Quota lookup error: %v", err)
 				b.sendReply(channel, m, "⚠️ Có lỗi xảy ra khi kiểm tra lượt dùng.")
 				return
 			}
-			b.sendReply(channel, m, FormatQuotaMessage(used, scanLimit, remaining, askLimit))
+			b.sendReply(channel, m, FormatQuotaMessage(scanUsed, scanLimit, scanRem, ocrUsed, ocrLimit, ocrRem, askLimit))
 			return
 		}
 
@@ -162,8 +172,15 @@ func (b *OmniScanBot) setupHandlers() {
 		var isAttachment bool
 		var attachmentName string
 		var attachmentSize int
+		var customPrompt string
 
-		if isScanCmd || isOCRCmd {
+		if isScanCmd {
+			// *scan ["custom prompt"] [url]
+			rest := strings.TrimSpace(strings.TrimPrefix(text, "*scan"))
+			args := ParseScanArgs(rest)
+			customPrompt = args.CustomPrompt
+			targetURL = args.URL
+		} else if isOCRCmd {
 			parts := strings.Fields(text)
 			if len(parts) > 1 {
 				targetURL = parts[1]
@@ -196,9 +213,15 @@ func (b *OmniScanBot) setupHandlers() {
 		}
 
 		// Dynamically fetch user-specific limits from DB (auto-provisions defaults on first encounter)
-		scanLimit, _, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.SessionAskLimit)
+		scanLimit, ocrLimit, _, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
 
-		allowed, currentCount, err := b.store.CheckAndIncrementQuota(m.SenderID, scanLimit)
+		var allowed bool
+		var currentCount int
+		if isOCRCmd {
+			allowed, currentCount, err = b.store.CheckAndIncrementOCRQuota(m.SenderID, ocrLimit)
+		} else {
+			allowed, currentCount, err = b.store.CheckAndIncrementScanQuota(m.SenderID, scanLimit)
+		}
 		if err != nil {
 			log.Printf("❌ Quota error for user %s: %v", m.SenderID, err)
 			b.sendReply(channel, m, "⚠️ Có lỗi xảy ra khi kiểm tra lượt dùng.")
@@ -206,76 +229,113 @@ func (b *OmniScanBot) setupHandlers() {
 		}
 
 		if !allowed {
-			b.sendReply(channel, m, fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt scan miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", scanLimit, scanLimit))
+			var limitLabel string
+		if isOCRCmd {
+			limitLabel = fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt OCR miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, ocrLimit)
+		} else {
+			limitLabel = fmt.Sprintf("⚠️ Bạn đã dùng hết **%d/%d** lượt scan miễn phí hôm nay! Vui lòng quay lại vào ngày mai.", currentCount, scanLimit)
+		}
+		b.sendReply(channel, m, limitLabel)
 			return
 		}
 
 		if isOCRCmd {
-			// Raw OCR flow
-			log.Printf("🔍 [Raw OCR %d/%d] Processing OCR for %s (URL: %s)", currentCount, scanLimit, sender, targetURL)
+			// Raw OCR flow — uses SubmitAndPollFull so we get bbox blocks for 2D layout
+			log.Printf("🔍 [Raw OCR %d/%d] Processing for %s (URL: %s)", currentCount, scanLimit, sender, targetURL)
 			b.sendReply(channel, m, fmt.Sprintf("⏳ Đang bóc tách OCR (Lượt %d/%d), vui lòng chờ...", currentCount, scanLimit))
 
-			go func(chanID string, msg *mezon.ChannelMessage, urlToScan, userID string) {
+			go func(msg *mezon.ChannelMessage, urlToScan, userID string, asAttachment bool) {
 				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 				defer cancel()
 
-				extractedText, err := b.ocrClient.SubmitAndPoll(ctx, urlToScan)
+				result, err := b.submitOCRFull(ctx, urlToScan, asAttachment)
 				if err != nil {
 					log.Printf("❌ OCR Error: %v. Refunded quota.", err)
-					_ = b.store.RefundQuota(userID)
+					_ = b.store.RefundOCRQuota(userID)
 					b.sendReply(channel, msg, fmt.Sprintf("❌ **Lỗi xử lý OCR:** %v (Đã hoàn 1 lượt)", err))
 					return
 				}
 
-				reply := FormatOCRReply(extractedText, currentCount, scanLimit)
-				b.sendReply(channel, msg, reply)
-			}(m.ChannelID, m, targetURL, m.SenderID)
+				reconstructed := ocrlib.ReconstructLayout(result)
+				out := BuildOCRResult(result, reconstructed, currentCount, scanLimit)
+
+				// Deliver embed card
+				sentMsg, sendErr := b.sendReplyContent(channel, msg, out.Content)
+
+				// If text was too long, send the .txt file as a follow-up
+				if len(out.FileBytes) > 0 {
+					attachMsg := fmt.Sprintf("📎 Văn bản OCR đầy đủ (%d ký tự) — tải về để xem:", len([]rune(string(out.FileBytes))))
+					_ = b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, attachMsg)
+				}
+
+				// Save session for optional follow-up Q&A on the OCR result
+				if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
+					_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", "Raw OCR", reconstructed)
+				}
+			}(m, targetURL, m.SenderID, isAttachment)
 			return
 		}
 
 		// Smart AI Agent *scan flow.
 		if !b.agent.IsHealthy() {
-			log.Printf("⚠️ [*scan] LLM endpoint down — failing fast instead of letting the call time out.")
-			b.sendReply(channel, m, "🔴 **AI Agent chưa sẵn sàng** — server model LLM không kết nối được lúc khởi động, nên luồng `*scan` (AI) đang tắt.\\nBạn vẫn dùng `*ocr` (bóc tách Raw OCR) bình thường. Vui lòng báo admin kiểm tra LLM endpoint.")
+			log.Printf("⚠️ [*scan] LLM endpoint down — failing fast.")
+			b.sendReply(channel, m, "🔴 **AI Agent chưa sẵn sàng** — `*ocr` vẫn dùng bình thường. Vui lòng báo admin kiểm tra LLM endpoint.")
 			return
 		}
-		log.Printf("🤖 [AI Agent *scan %d/%d] Processing for %s (URL: %s)", currentCount, scanLimit, sender, targetURL)
-		b.sendReply(channel, m, fmt.Sprintf("⏳ 🧠 AI Agent đang phân tích & định dạng tài liệu (Lượt %d/%d), vui lòng chờ...", currentCount, scanLimit))
 
-		go func(chanID string, msg *mezon.ChannelMessage, urlToScan, userID string) {
+		promptHint := ""
+		if customPrompt != "" {
+			promptHint = fmt.Sprintf(" (prompt: \"%s\")", customPrompt)
+		}
+		log.Printf("🤖 [AI *scan %d/%d] Processing for %s (URL: %s)%s", currentCount, scanLimit, sender, targetURL, promptHint)
+		b.sendReply(channel, m, fmt.Sprintf("⏳ 🧠 AI đang phân tích tài liệu (Lượt %d/%d)%s, vui lòng chờ...", currentCount, scanLimit, promptHint))
+
+		go func(msg *mezon.ChannelMessage, urlToScan, userID, prompt string, asAttachment bool) {
 			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 			defer cancel()
 
-			extractedText, err := b.ocrClient.SubmitAndPoll(ctx, urlToScan)
+			// Full result for bbox reconstruction
+			result, err := b.submitOCRFull(ctx, urlToScan, asAttachment)
 			if err != nil {
 				log.Printf("❌ OCR Error: %v. Refunded quota.", err)
-				_ = b.store.RefundQuota(userID)
+				_ = b.store.RefundScanQuota(userID)
 				b.sendReply(channel, msg, fmt.Sprintf("❌ **Lỗi xử lý OCR:** %v (Đã hoàn 1 lượt)", err))
 				return
 			}
+			reconstructed := ocrlib.ReconstructLayout(result)
 
-			// Call LLM Agent for Auto-Classification & Structured Formatting
-			res, err := b.agent.ClassifyAndFormat(ctx, extractedText)
+			_, _, askLimit, _ := b.store.GetOrCreateUserConfig(userID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
+
+			// Call LLM with optional custom prompt
+			res, err := b.agent.ClassifyAndFormat(ctx, reconstructed, prompt)
 			if err != nil {
-				log.Printf("⚠️ LLM formatting error: %v. Falling back to raw OCR.", err)
-				reply := FormatOCRReply(extractedText, currentCount, scanLimit)
-				b.sendReply(channel, msg, reply)
+				log.Printf("⚠️ LLM error: %v. Fallback to raw OCR embed.", err)
+				out := BuildOCRResult(result, reconstructed, currentCount, scanLimit)
+				b.sendReplyContent(channel, msg, out.Content)
+				if len(out.FileBytes) > 0 {
+					_ = b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, "📎 Văn bản OCR đầy đủ:")
+				}
 				return
 			}
 
-			fullReply := FormatAIReply(res.DocType, res.Formatted, currentCount, scanLimit)
+			out := BuildScanResult(res.DocType, res.Formatted, currentCount, scanLimit, askLimit)
 
-			sentMsg, err := b.sendReply(channel, msg, fullReply)
-			if err == nil && sentMsg != nil && sentMsg.ID != "" {
-				// Save session for follow-up Q&A
-				_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", res.DocType, extractedText)
+			sentMsg, sendErr := b.sendReplyContent(channel, msg, out.Content)
+
+			// If AI output was very long, also send it as a .md file
+			if len(out.FileBytes) > 0 {
+				_ = b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, "📎 Kết quả AI đầy đủ (Markdown):")
 			}
-		}(m.ChannelID, m, targetURL, m.SenderID)
+
+			if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
+				_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", res.DocType, reconstructed)
+			}
+		}(m, targetURL, m.SenderID, customPrompt, isAttachment)
 	})
 }
 
 func (b *OmniScanBot) handleThreadQuestion(channel *mezon.TextChannel, m *mezon.ChannelMessage, sess *storage.ScanSession, question string) {
-	_, askLimit, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.SessionAskLimit)
+	_, _, askLimit, _ := b.store.GetOrCreateUserConfig(m.SenderID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
 	allowed, askCount, err := b.sessionStore.CheckAndIncrementAskQuota(sess.SessionID, askLimit)
 	if err != nil {
 		log.Printf("❌ Ask quota error: %v", err)
@@ -330,13 +390,13 @@ func (b *OmniScanBot) handleButtonClicked(e *mezon.MessageButtonClick) {
 	}
 	switch e.ButtonID {
 	case "omniscan_quota":
-		scanLimit, askLimit, _ := b.store.GetOrCreateUserConfig(e.SenderID, b.cfg.DailyScanLimit, b.cfg.SessionAskLimit)
-		used, remaining, qerr := b.store.GetQuota(e.SenderID, scanLimit)
+		scanLimit, ocrLimit, askLimit, _ := b.store.GetOrCreateUserConfig(e.SenderID, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit)
+		scanUsed, scanRem, ocrUsed, ocrRem, qerr := b.store.GetQuota(e.SenderID, scanLimit, ocrLimit)
 		if qerr != nil {
 			b.sendText(channel, e.SenderID, "⚠️ Có lỗi xảy ra khi kiểm tra lượt dùng.")
 			return
 		}
-		b.sendText(channel, e.SenderID, FormatQuotaMessage(used, scanLimit, remaining, askLimit))
+		b.sendText(channel, e.SenderID, FormatQuotaMessage(scanUsed, scanLimit, scanRem, ocrUsed, ocrLimit, ocrRem, askLimit))
 	case "omniscan_scan_hint":
 		b.sendText(channel, e.SenderID, "💡 Gửi `*scan <url>` hoặc đính kèm ảnh/PDF kèm `*scan`. AI sẽ tự nhận diện & định dạng Markdown.")
 	default:
@@ -361,22 +421,20 @@ func (b *OmniScanBot) sendText(channel *mezon.TextChannel, userID, text string) 
 }
 
 // sendReplyContent sends an arbitrary Content (e.g. an interactive embed) with
-// a leading mention of the sender, used for the help card.
-func (b *OmniScanBot) sendReplyContent(channel *mezon.TextChannel, m *mezon.ChannelMessage, content mezon.Content) {
+// a leading mention of the sender. Returns the sent message and any error.
+func (b *OmniScanBot) sendReplyContent(channel *mezon.TextChannel, m *mezon.ChannelMessage, content mezon.Content) (*mezon.Message, error) {
 	handle := "@" + firstNonEmptyName(m)
 	mention, ok := mezon.MentionUser(handle, m.SenderID, firstNonEmptyName(m))
-	// Prepend the handle to the plain-text portion so the chip renders. We bake
-	// the mention into a leading text node by wrapping: many Mezon clients show
-	// the embed's author/footer instead, so keep the text short.
+	var opts *mezon.SendOptions
 	if ok {
-		if _, err := channel.Send(content, &mezon.SendOptions{Mentions: []mezon.Mention{mention}}); err != nil {
-			log.Printf("❌ sendReplyContent to %s: %v", channel.ID, err)
-		}
-		return
+		opts = &mezon.SendOptions{Mentions: []mezon.Mention{mention}}
 	}
-	if _, err := channel.Send(content, nil); err != nil {
+	sentMsg, err := channel.Send(content, opts)
+	if err != nil {
 		log.Printf("❌ sendReplyContent to %s: %v", channel.ID, err)
+		return nil, err
 	}
+	return sentMsg, nil
 }
 
 // upsertSeenUser records (or refreshes) a user in PostgreSQL when the bot sees
@@ -390,7 +448,7 @@ func (b *OmniScanBot) upsertSeenUser(userID, displayName, username, clanNick str
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := b.pgQuota.UpsertUser(ctx, userID, displayName, username, clanNick, b.cfg.DailyScanLimit, b.cfg.SessionAskLimit); err != nil {
+	if err := b.pgQuota.UpsertUser(ctx, userID, displayName, username, clanNick, b.cfg.DailyScanLimit, b.cfg.DailyOCRLimit, b.cfg.SessionAskLimit); err != nil {
 		log.Printf("⚠️ UpsertUser %s: %v", userID, err)
 	}
 }
@@ -425,4 +483,105 @@ func firstNonEmptyName(m *mezon.ChannelMessage) string {
 		}
 	}
 	return m.SenderID
+}
+
+// sendFileAttachment sends fileBytes as a file or inline code-block fallback.
+// Mezon's current SDK does not expose a file-upload API, so we always fall back
+// to sending the content inline (truncated to 3 000 runes to stay within limits).
+func (b *OmniScanBot) sendFileAttachment(channel *mezon.TextChannel, _ *mezon.ChannelMessage, filename string, data []byte, caption string) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	runes := []rune(string(data))
+	truncated := false
+	if len(runes) > 3000 {
+		runes = runes[:3000]
+		truncated = true
+	}
+
+	note := ""
+	if truncated {
+		note = fmt.Sprintf("\n*(Cắt ngắn — đầy đủ %d ký tự trong file `%s`)*", len([]rune(string(data))), filename)
+	}
+
+	body := fmt.Sprintf("%s\n```\n%s\n```%s", caption, string(runes), note)
+	_, err := channel.Send(mezon.Text(body), nil)
+	return err
+}
+
+// downloadAttachmentBytes fetches the attachment URL on the bot host (same
+// network that received the Mezon event), so it succeeds even when the OCR
+// proxy host's network cannot reach cdn.komu.vn. It caps the download at the
+// same 100 MiB the validator allows for attachments. Mezon CDN may return a
+// transient 404 (edge node not synced yet at the instant the bot receives the
+// upload event), so the download is retried with backoff.
+func (b *OmniScanBot) downloadAttachmentBytes(ctx context.Context, url string) ([]byte, error) {
+	const maxBytes = 100 * 1024 * 1024 // 100 MiB, matches security.Validator
+	backoffs := []time.Duration{1 * time.Second, 3 * time.Second, 6 * time.Second}
+
+	var lastErr error
+	for attempt := 0; attempt <= len(backoffs); attempt++ {
+		if attempt > 0 {
+			log.Printf("⏳ [download] retry %d after %v for %s", attempt, backoffs[attempt-1], url)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoffs[attempt-1]):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "OmniScan-Bot/1.0")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
+			// Transient CDN errors are worth retrying; 4xx other than 404 are not.
+			if resp.StatusCode != 404 && resp.StatusCode != 408 && resp.StatusCode != 429 && resp.StatusCode < 500 {
+				return nil, lastErr
+			}
+			continue
+		}
+
+		r := io.LimitReader(resp.Body, maxBytes+1)
+		data, err := io.ReadAll(r)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > maxBytes {
+			return nil, fmt.Errorf("download %s: exceeds 100 MiB limit", url)
+		}
+		if attempt > 0 {
+			log.Printf("✅ [download] succeeded on retry %d", attempt)
+		}
+		return data, nil
+	}
+	return nil, lastErr
+}
+
+// submitOCRFull dispatches an OCR submit + poll, choosing the URL or base64
+// path. For Mezon attachments the url points at cdn.komu.vn behind Cloudflare;
+// the proxy host sometimes cannot fetch it (404 / geo-block), so the bot
+// downloads the attachment itself and submits the raw bytes as base64,
+// bypassing the proxy's URL fetcher entirely. The proxy sniffs the MIME type
+// from the bytes, so no mimeType field is sent.
+func (b *OmniScanBot) submitOCRFull(ctx context.Context, urlToScan string, asAttachment bool) (*ocrlib.ResultPayload, error) {
+	if !asAttachment {
+		return b.ocrClient.SubmitAndPollFull(ctx, urlToScan)
+	}
+	data, err := b.downloadAttachmentBytes(ctx, urlToScan)
+	if err != nil {
+		return nil, fmt.Errorf("download attachment: %w", err)
+	}
+	return b.ocrClient.SubmitAndPollBase64Full(ctx, data)
 }

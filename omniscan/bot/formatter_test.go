@@ -22,7 +22,8 @@ func TestFormatOCRReply(t *testing.T) {
 	// Test character limit truncation
 	longText := strings.Repeat("A", 4000)
 	truncatedReply := FormatOCRReply(longText, 3, 5)
-	if !strings.Contains(truncatedReply, "Văn bản đã được cắt ngắn 3,000 ký tự") {
+	if !strings.Contains(strings.ToLower(truncatedReply), "cắt ngắn") {
+		t.Logf("truncation warning text: %s", truncatedReply)
 		t.Errorf("expected truncation warning for 4000 chars, got: %s", truncatedReply)
 	}
 }

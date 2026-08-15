@@ -16,49 +16,69 @@ func TestSQLiteQuotaStore(t *testing.T) {
 	defer store.Close()
 
 	userID := "user_test_123"
-	limit := 5
+	scanLimit, ocrLimit := 3, 5
 
-	for i := 1; i <= 5; i++ {
-		allowed, count, err := store.CheckAndIncrementQuota(userID, limit)
+	// *scan counter: 3 increments allowed, 4th rejected.
+	for i := 1; i <= scanLimit; i++ {
+		allowed, count, err := store.CheckAndIncrementScanQuota(userID, scanLimit)
 		if err != nil {
-			t.Fatalf("unexpected error on scan %d: %v", i, err)
+			t.Fatalf("scan %d: %v", i, err)
 		}
-		if !allowed {
-			t.Errorf("expected scan %d to be allowed", i)
-		}
-		if count != i {
-			t.Errorf("expected count %d, got %d", i, count)
+		if !allowed || count != i {
+			t.Errorf("scan %d: want allowed=true count=%d, got allowed=%v count=%d", i, i, allowed, count)
 		}
 	}
+	if allowed, count, err := store.CheckAndIncrementScanQuota(userID, scanLimit); err != nil || allowed || count != scanLimit {
+		t.Errorf("scan over-limit: want allowed=false count=%d, got allowed=%v count=%d err=%v", scanLimit, allowed, count, err)
+	}
 
-	allowed, count, err := store.CheckAndIncrementQuota(userID, limit)
+	// *ocr counter is INDEPENDENT: still 0, all 5 increments must succeed.
+	for i := 1; i <= ocrLimit; i++ {
+		allowed, count, err := store.CheckAndIncrementOCRQuota(userID, ocrLimit)
+		if err != nil {
+			t.Fatalf("ocr %d: %v", i, err)
+		}
+		if !allowed || count != i {
+			t.Errorf("ocr %d: want allowed=true count=%d, got allowed=%v count=%d", i, i, allowed, count)
+		}
+	}
+	if allowed, _, err := store.CheckAndIncrementOCRQuota(userID, ocrLimit); err != nil || allowed {
+		t.Errorf("ocr over-limit: want allowed=false, got allowed=%v err=%v", allowed, err)
+	}
+
+	// GetQuota reports both counters independently.
+	scanUsed, scanRem, ocrUsed, ocrRem, err := store.GetQuota(userID, scanLimit, ocrLimit)
 	if err != nil {
-		t.Fatalf("unexpected error on 6th scan: %v", err)
+		t.Fatalf("GetQuota: %v", err)
 	}
-	if allowed {
-		t.Errorf("expected 6th scan to be rejected")
+	if scanUsed != scanLimit || scanRem != 0 {
+		t.Errorf("scan: want used=%d rem=0, got used=%d rem=%d", scanLimit, scanUsed, scanRem)
 	}
-	if count != 5 {
-		t.Errorf("expected count to stay at 5, got %d", count)
-	}
-
-	used, remaining, err := store.GetQuota(userID, limit)
-	if err != nil {
-		t.Fatalf("GetQuota error: %v", err)
-	}
-	if used != 5 || remaining != 0 {
-		t.Errorf("expected used 5, remaining 0, got used %d, remaining %d", used, remaining)
+	if ocrUsed != ocrLimit || ocrRem != 0 {
+		t.Errorf("ocr: want used=%d rem=0, got used=%d rem=%d", ocrLimit, ocrUsed, ocrRem)
 	}
 
-	if err := store.RefundQuota(userID); err != nil {
-		t.Fatalf("RefundQuota error: %v", err)
+	// Refund only the scan counter; OCR stays unchanged.
+	if err := store.RefundScanQuota(userID); err != nil {
+		t.Fatalf("RefundScanQuota: %v", err)
+	}
+	scanUsed, scanRem, ocrUsed, ocrRem, _ = store.GetQuota(userID, scanLimit, ocrLimit)
+	if scanUsed != scanLimit-1 || scanRem != 1 {
+		t.Errorf("after scan refund: want used=%d rem=1, got used=%d rem=%d", scanLimit-1, scanUsed, scanRem)
+	}
+	if ocrUsed != ocrLimit || ocrRem != 0 {
+		t.Errorf("ocr unchanged: want used=%d rem=0, got used=%d rem=%d", ocrLimit, ocrUsed, ocrRem)
 	}
 
-	used, remaining, err = store.GetQuota(userID, limit)
-	if err != nil {
-		t.Fatalf("GetQuota after refund error: %v", err)
+	// Refund OCR counter; scan stays unchanged.
+	if err := store.RefundOCRQuota(userID); err != nil {
+		t.Fatalf("RefundOCRQuota: %v", err)
 	}
-	if used != 4 || remaining != 1 {
-		t.Errorf("expected used 4, remaining 1 after refund, got used %d, remaining %d", used, remaining)
+	scanUsed, _, ocrUsed, ocrRem, _ = store.GetQuota(userID, scanLimit, ocrLimit)
+	if scanUsed != scanLimit-1 {
+		t.Errorf("scan unchanged after OCR refund: want used=%d, got %d", scanLimit-1, scanUsed)
+	}
+	if ocrUsed != ocrLimit-1 || ocrRem != 1 {
+		t.Errorf("ocr after refund: want used=%d rem=1, got used=%d rem=%d", ocrLimit-1, ocrUsed, ocrRem)
 	}
 }

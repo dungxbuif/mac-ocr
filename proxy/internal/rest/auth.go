@@ -189,6 +189,12 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if sessionObj, exists := c.Get("admin.session"); exists {
+		if s, ok := sessionObj.(*AdminSession); ok && s.Role != domain.RoleAdmin && s.UserID != userID {
+			RespondProblem(c, errs.Forbidden("cannot reset password of another account"))
+			return
+		}
+	}
 	var req resetPasswordReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		RespondProblem(c, errs.InvalidInput(err.Error()))
@@ -198,7 +204,7 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 		RespondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "password reset successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "password updated successfully"})
 }
 
 func (h *AuthHandler) GetAccountConfig(c *gin.Context) {
@@ -272,6 +278,12 @@ func (h *AuthHandler) CreateAPIKey(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if sessionObj, exists := c.Get("admin.session"); exists {
+		if s, ok := sessionObj.(*AdminSession); ok && s.Role != domain.RoleAdmin && s.UserID != userID {
+			RespondProblem(c, errs.Forbidden("cannot create keys for another account"))
+			return
+		}
+	}
 	var req createKeyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		RespondProblem(c, errs.InvalidInput(err.Error()))
@@ -290,6 +302,12 @@ func (h *AuthHandler) ListAPIKeys(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if sessionObj, exists := c.Get("admin.session"); exists {
+		if s, ok := sessionObj.(*AdminSession); ok && s.Role != domain.RoleAdmin && s.UserID != userID {
+			RespondProblem(c, errs.Forbidden("cannot view keys of another account"))
+			return
+		}
+	}
 	keys, err := h.svc.ListKeys(c.Request.Context(), userID)
 	if err != nil {
 		RespondError(c, err)
@@ -306,6 +324,12 @@ func (h *AuthHandler) RevokeAPIKey(c *gin.Context) {
 	keyID, ok := parseID(c, "kid")
 	if !ok {
 		return
+	}
+	if sessionObj, exists := c.Get("admin.session"); exists {
+		if s, ok := sessionObj.(*AdminSession); ok && s.Role != domain.RoleAdmin && s.UserID != userID {
+			RespondProblem(c, errs.Forbidden("cannot revoke keys of another account"))
+			return
+		}
 	}
 	if err := h.svc.RevokeKey(c.Request.Context(), userID, keyID); err != nil {
 		RespondError(c, err)
@@ -326,6 +350,12 @@ func (h *AuthHandler) UpdateAPIKey(c *gin.Context) {
 	keyID, ok := parseID(c, "kid")
 	if !ok {
 		return
+	}
+	if sessionObj, exists := c.Get("admin.session"); exists {
+		if s, ok := sessionObj.(*AdminSession); ok && s.Role != domain.RoleAdmin && s.UserID != userID {
+			RespondProblem(c, errs.Forbidden("cannot update keys of another account"))
+			return
+		}
 	}
 	var req updateKeyReq
 	if err := c.ShouldBindJSON(&req); err != nil {

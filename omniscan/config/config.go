@@ -1,13 +1,18 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
 
+// Config holds every application knob as explicit fields, loaded and validated
+// once at startup. There are NO hidden defaults: every value must be present
+// in the environment, and Load returns an error if any is missing or invalid,
+// so the process refuses to start rather than running with guessed values.
 type Config struct {
 	MezonBotID  string
 	MezonToken  string
@@ -15,8 +20,8 @@ type Config struct {
 	MezonPort   string
 	OCRProxyURL string
 	OCRAPIKey   string
-	DatabaseURL string // PostgreSQL. When set, quota + sessions persist there (multi-replica safe). Empty => SQLite fallback.
-	RedisURL    string // Redis. When set, dedup + L2 channel cache are shared across replicas.
+	DatabaseURL string // PostgreSQL — required, primary store for quota + sessions.
+	RedisURL    string // Redis — required, dedup + L2 cache shared across replicas.
 
 	// LLM Agent Configuration
 	LLMBaseURL string
@@ -24,19 +29,23 @@ type Config struct {
 	LLMModel   string
 
 	// Limit Quota Configurations
-	DailyScanLimit  int
-	SessionAskLimit int
+	DailyScanLimit  int // *scan quota per day, per user
+	DailyOCRLimit   int // *ocr quota per day, per user (separate counter)
+	SessionAskLimit int // Q&A asks per document (per session)
 }
 
+// Load reads .env (best-effort) plus the real environment, then validates that
+// every required variable is present. It returns an error for the first missing
+// or invalid field, causing startup to fail fast — there is no silent fallback.
 func Load() (*Config, error) {
 	_ = godotenv.Load(".env")
 
 	cfg := &Config{
 		MezonBotID:  os.Getenv("MEZON_BOT_ID"),
 		MezonToken:  os.Getenv("MEZON_BOT_TOKEN"),
-		MezonHost:   getEnvOrDefault("MEZON_HOST", "gw.mezon.ai"),
-		MezonPort:   getEnvOrDefault("MEZON_PORT", "443"),
-		OCRProxyURL: getEnvOrDefault("OCR_PROXY_URL", "http://localhost:8080"),
+		MezonHost:   os.Getenv("MEZON_HOST"),
+		MezonPort:   os.Getenv("MEZON_PORT"),
+		OCRProxyURL: os.Getenv("OCR_PROXY_URL"),
 		OCRAPIKey:   os.Getenv("OCR_API_KEY"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		RedisURL:    os.Getenv("REDIS_URL"),
@@ -44,43 +53,66 @@ func Load() (*Config, error) {
 		LLMBaseURL: os.Getenv("LLM_BASE_URL"),
 		LLMAPIKey:  os.Getenv("LLM_API_KEY"),
 		LLMModel:   os.Getenv("LLM_MODEL"),
-
-		DailyScanLimit:  getEnvIntOrDefault("DAILY_SCAN_LIMIT", 5),
-		SessionAskLimit: getEnvIntOrDefault("SESSION_ASK_LIMIT", 5),
 	}
 
-	if cfg.MezonBotID == "" {
-		return nil, errors.New("MEZON_BOT_ID is required")
+	var missing []string
+	require := func(name, val string) {
+		if strings.TrimSpace(val) == "" {
+			missing = append(missing, name)
+		}
 	}
-	if cfg.MezonToken == "" {
-		return nil, errors.New("MEZON_BOT_TOKEN is required")
+	require("MEZON_BOT_ID", cfg.MezonBotID)
+	require("MEZON_BOT_TOKEN", cfg.MezonToken)
+	require("MEZON_HOST", cfg.MezonHost)
+	require("MEZON_PORT", cfg.MezonPort)
+	require("OCR_PROXY_URL", cfg.OCRProxyURL)
+	require("OCR_API_KEY", cfg.OCRAPIKey)
+	require("DATABASE_URL", cfg.DatabaseURL)
+	require("REDIS_URL", cfg.RedisURL)
+	require("LLM_BASE_URL", cfg.LLMBaseURL)
+	require("LLM_API_KEY", cfg.LLMAPIKey)
+	require("LLM_MODEL", cfg.LLMModel)
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))
 	}
-	if cfg.OCRAPIKey == "" {
-		return nil, errors.New("OCR_API_KEY is required (generate via 'macocr-admin create-key')")
+
+	port, err := strconv.Atoi(cfg.MezonPort)
+	if err != nil || port <= 0 || port > 65535 {
+		return nil, fmt.Errorf("MEZON_PORT must be a valid port (1-65535), got %q", cfg.MezonPort)
 	}
-	if cfg.LLMBaseURL == "" {
-		return nil, errors.New("LLM_BASE_URL is required")
+
+	scanLimit, err := parsePositiveInt("DAILY_SCAN_LIMIT", os.Getenv("DAILY_SCAN_LIMIT"))
+	if err != nil {
+		return nil, err
 	}
-	if cfg.LLMModel == "" {
-		return nil, errors.New("LLM_MODEL is required")
+	cfg.DailyScanLimit = scanLimit
+
+	ocrLimit, err := parsePositiveInt("DAILY_OCR_LIMIT", os.Getenv("DAILY_OCR_LIMIT"))
+	if err != nil {
+		return nil, err
 	}
+	cfg.DailyOCRLimit = ocrLimit
+
+	askLimit, err := parsePositiveInt("SESSION_ASK_LIMIT", os.Getenv("SESSION_ASK_LIMIT"))
+	if err != nil {
+		return nil, err
+	}
+	cfg.SessionAskLimit = askLimit
 
 	return cfg, nil
 }
 
-func getEnvOrDefault(key, fallback string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
+// parsePositiveInt parses a strict positive integer env var. Empty, non-numeric,
+// or non-positive values yield an error so configuration problems surface
+// immediately instead of falling back to a hidden default.
+func parsePositiveInt(name, raw string) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, fmt.Errorf("%s is required (must be a positive integer)", name)
 	}
-	return fallback
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer, got %q", name, raw)
+	}
+	return v, nil
 }
 
-func getEnvIntOrDefault(key string, fallback int) int {
-	if val := os.Getenv(key); val != "" {
-		var res int
-		if _, err := fmt.Sscanf(val, "%d", &res); err == nil && res > 0 {
-			return res
-		}
-	}
-	return fallback
-}

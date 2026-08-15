@@ -196,7 +196,7 @@ func (h *AdminAuthHandler) Login(c *gin.Context) {
 	}
 
 	u, err := h.users.GetByEmail(c.Request.Context(), req.Email)
-	if err != nil || u.Disabled || u.Role != domain.RoleAdmin {
+	if err != nil || u.Disabled {
 		RespondProblem(c, errs.Unauthorized("invalid email or password"))
 		return
 	}
@@ -278,8 +278,13 @@ func (h *AdminAuthHandler) DashboardStats(c *gin.Context) {
 func (h *AdminAuthHandler) RequireAdminSession() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session, ok := h.sessionFromContext(c)
-		if !ok || session.Role != domain.RoleAdmin {
+		if !ok {
 			RespondProblem(c, errs.Unauthorized("session invalid or account deactivated"))
+			c.Abort()
+			return
+		}
+		if session.Role != domain.RoleAdmin {
+			RespondProblem(c, errs.Forbidden("admin privileges required"))
 			c.Abort()
 			return
 		}
@@ -300,6 +305,31 @@ func (h *AdminAuthHandler) RequireAdminSession() gin.HandlerFunc {
 	}
 }
 
+func (h *AdminAuthHandler) RequireSession() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session, ok := h.sessionFromContext(c)
+		if !ok {
+			RespondProblem(c, errs.Unauthorized("session invalid or account deactivated"))
+			c.Abort()
+			return
+		}
+
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead && c.Request.Method != http.MethodOptions {
+			csrfHeader := c.GetHeader("X-CSRF-Token")
+			if csrfHeader == "" || csrfHeader != session.CSRFToken {
+				RespondProblem(c, errs.Forbidden("invalid or missing CSRF token"))
+				c.Abort()
+				return
+			}
+		}
+
+		c.Set("admin.session", session)
+		c.Set(auditActor, string(session.Role))
+		c.Set(auditUserID, session.UserID)
+		c.Next()
+	}
+}
+
 func (h *AdminAuthHandler) sessionFromContext(c *gin.Context) (*AdminSession, bool) {
 	token, err := c.Cookie(SessionCookieName)
 	if err != nil || token == "" {
@@ -314,7 +344,7 @@ func (h *AdminAuthHandler) sessionFromContext(c *gin.Context) (*AdminSession, bo
 	// makes account deactivation and role changes effective without waiting for
 	// the in-memory session TTL.
 	user, err := h.users.GetByID(c.Request.Context(), session.UserID)
-	if err != nil || user.Disabled || user.Role != domain.RoleAdmin {
+	if err != nil || user.Disabled {
 		h.sm.Delete(token)
 		return nil, false
 	}

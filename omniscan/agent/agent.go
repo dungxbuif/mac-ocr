@@ -56,8 +56,11 @@ func (a *Agent) SetHealth(ok bool) { healthy = ok }
 // IsHealthy reports whether the startup LLM probe succeeded.
 func (a *Agent) IsHealthy() bool { return healthy }
 
-func (a *Agent) ClassifyAndFormat(ctx context.Context, ocrText string) (*ClassifyResult, error) {
-	systemPrompt := `Bạn là AI Agent trợ lý phân tích tài liệu chuyên nghiệp. 
+// ClassifyAndFormat analyses ocrText and returns a structured, markdown-formatted
+// result. When customPrompt is non-empty it is appended to the system instructions
+// so the user can steer the output (e.g. "dịch ra tiếng Anh", "chỉ lấy số tiền").
+func (a *Agent) ClassifyAndFormat(ctx context.Context, ocrText, customPrompt string) (*ClassifyResult, error) {
+	systemPrompt := `Bạn là AI Agent trợ lý phân tích tài liệu chuyên nghiệp.
 Nhiệm vụ của bạn:
 1. Đọc văn bản OCR được cung cấp.
 2. Tự động nhận diện loại tài liệu:
@@ -67,11 +70,16 @@ Nhiệm vụ của bạn:
    - Tài liệu kỹ thuật / Bài viết / Khác (General Document)
 3. Chỉnh sửa lỗi chính tả OCR, nối dòng văn bản bị ngắt quãng, loại bỏ rác.
 4. Trình bày lại kết quả dưới dạng Markdown đẹp mắt:
-   - Với Hóa đơn/CCCD: Dùng bảng Markdown (Table) trích xuất rõ các trường thông tin (Tổng tiền, Ngày, Mã số, Danh sách hàng...).
-   - Với Hợp đồng: Tóm tắt các điều khoản chính, số tiền, mốc thời gian và điểm lưu ý quan trọng.
+   - Với Hóa đơn/CCCD: Dùng bảng Markdown (Table) trích xuất rõ các trường thông tin.
+   - Với Hợp đồng: Tóm tắt các điều khoản chính, số tiền, mốc thời gian.
    - Với Tài liệu chung: Định dạng bài viết chuẩn với tiêu đề (#, ##) và các mục rõ ràng.
 
 Hãy bắt đầu bằng dòng đầu tiên chỉ ghi tên loại tài liệu trong ngoặc vuông, ví dụ: [Hóa đơn] hoặc [Hợp đồng] hoặc [CCCD] hoặc [Tài liệu chung], sau đó trình bày chi tiết.`
+
+	// Append user-supplied prompt override (e.g. "dịch ra tiếng Anh")
+	if strings.TrimSpace(customPrompt) != "" {
+		systemPrompt += "\n\n📝 YÊU CẦU ĐẶC BIỆT TỪ NGƯỜI DÙNG: " + strings.TrimSpace(customPrompt)
+	}
 
 	resp, err := a.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: a.model,

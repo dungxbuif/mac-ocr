@@ -87,7 +87,6 @@ function generateStrongPassword(): string {
 
 function App() {
   const [session, setSession] = useState<{ loading: boolean; user: User | null }>({ loading: true, user: null });
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [csrf, setCsrf] = useState(() => getCookie("macocr_csrf"));
   const [toast, setToast] = useState("");
 
@@ -153,6 +152,8 @@ function App() {
 
   if (!session.user) return <Login onSubmit={login} />;
 
+  const isAdmin = session.user.role === "admin";
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -162,30 +163,27 @@ function App() {
           </span>
           <div>
             <div style={{ lineHeight: 1.2, fontWeight: 700 }}>MacOCR</div>
-            <span style={{ fontSize: "11px", color: "var(--text-dim)", fontWeight: 500 }}>Cluster Control Plane</span>
+            <span style={{ fontSize: "11px", color: "var(--text-dim)", fontWeight: 500 }}>
+              {isAdmin ? "Admin Console" : "Developer Portal"}
+            </span>
           </div>
         </div>
         <nav className="nav">
-          <a
-            href="#/users"
-            onClick={(e) => {
-              e.preventDefault();
-              setSelectedUser(null);
-            }}
-            className={`nav-link ${!selectedUser ? "active" : ""}`}
-          >
-            <UsersIcon size={16} />
-            <span>Accounts & API Keys</span>
+          <a href="#/portal" className="nav-link active">
+            {isAdmin ? <UsersIcon size={16} /> : <Key size={16} />}
+            <span>{isAdmin ? "User Accounts & Quotas" : "API Credentials & Limits"}</span>
           </a>
         </nav>
         <div className="sidebar-footer">
           <a href="/" target="_blank" rel="noreferrer" className="nav-link" style={{ fontSize: "12px" }}>
-            <span>API Docs</span>
+            <span>API Documentation</span>
             <ExternalLink size={13} style={{ marginLeft: "auto" }} />
           </a>
           <div className="account-box">
             <div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-              <div style={{ fontSize: "10px", textTransform: "uppercase", color: "var(--text-dim)", fontWeight: 600 }}>System Admin</div>
+              <div style={{ fontSize: "10px", textTransform: "uppercase", color: "var(--text-dim)", fontWeight: 600 }}>
+                {isAdmin ? "System Administrator" : "Developer Account"}
+              </div>
               <strong style={{ fontSize: "12px", whiteSpace: "nowrap", color: "var(--text-main)" }}>{session.user.email}</strong>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={logout} title="Sign out">
@@ -196,20 +194,17 @@ function App() {
       </aside>
 
       <main className="workspace">
-        {selectedUser ? (
-          <UserApiKeysPage
-            user={selectedUser}
-            api={api}
-            notify={notify}
-            onBack={() => setSelectedUser(null)}
-            onUserUpdated={(u) => setSelectedUser(u)}
-          />
-        ) : (
-          <UsersListPage
+        {isAdmin ? (
+          <AdminUsersListPage
             api={api}
             notify={notify}
             currentUser={session.user}
-            onSelectUser={(u) => setSelectedUser(u)}
+          />
+        ) : (
+          <UserSelfPortal
+            user={session.user}
+            api={api}
+            notify={notify}
           />
         )}
       </main>
@@ -218,16 +213,15 @@ function App() {
   );
 }
 
-function UsersListPage({
+// ---------------- Admin View: Manage Users, Quotas, Status, Reset Password (NO VIEWING OTHER'S KEYS) ----------------
+function AdminUsersListPage({
   api,
   notify,
   currentUser,
-  onSelectUser,
 }: {
   api: (p: string, opt?: RequestInit) => Promise<Response>;
   notify: (m: string) => void;
   currentUser: User;
-  onSelectUser: (u: User) => void;
 }) {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -260,7 +254,7 @@ function UsersListPage({
 
   async function handleSaveLimits(userId: number, rate: number, quota: number, storageGB: number) {
     const res = await api(`/v1/users/${userId}/config`, {
-      method: "PUT",
+      method: "PATCH",
       body: JSON.stringify({
         rate_limit_rpm: rate,
         doc_quota: quota,
@@ -269,7 +263,7 @@ function UsersListPage({
     });
     if (res.ok) {
       setEditLimitsUser(null);
-      notify("Quotas and limits updated");
+      notify("Account limits & quotas updated");
       load();
     } else {
       notify("Failed to update limits");
@@ -313,10 +307,10 @@ function UsersListPage({
         <div>
           <div className="eyebrow">
             <Activity size={12} />
-            <span>Developer Management</span>
+            <span>Administrator Control</span>
           </div>
-          <h1>User Accounts & Quotas</h1>
-          <p className="page-desc">Provision user accounts, configure rate & storage quotas, manage passwords, and inspect issued API keys.</p>
+          <h1>User Accounts & Resource Limits</h1>
+          <p className="page-desc">Provision developer accounts, configure rate & storage quotas, and manage account statuses.</p>
         </div>
         <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>
           <Plus size={15} />
@@ -326,7 +320,7 @@ function UsersListPage({
 
       <div className="panel">
         <div className="panel-header">
-          <span style={{ fontSize: "13px", fontWeight: 650 }}>{users.length} User Accounts</span>
+          <span style={{ fontSize: "13px", fontWeight: 650 }}>{users.length} Registered Accounts</span>
           <button className="btn btn-ghost btn-sm" onClick={load}>
             <RefreshCw size={13} />
             <span>Refresh</span>
@@ -341,7 +335,7 @@ function UsersListPage({
               <th>Document Quota</th>
               <th>Storage Quota</th>
               <th>Storage Used</th>
-              <th style={{ textAlign: "right" }}>Actions</th>
+              <th style={{ textAlign: "right" }}>Account Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -354,7 +348,7 @@ function UsersListPage({
             )}
             {!loading &&
               users.map((u) => {
-                const isAdmin = u.role === "admin";
+                const isItemAdmin = u.role === "admin";
                 const isUnlimitedRate = !u.config?.rate_limit_rpm || u.config.rate_limit_rpm === 0;
                 const isUnlimitedDoc = !u.config?.doc_quota || u.config.doc_quota === 0;
                 const isUnlimitedStorage = !u.config?.storage_quota_bytes || u.config.storage_quota_bytes === 0;
@@ -365,7 +359,7 @@ function UsersListPage({
                       <div>
                         <strong style={{ color: "var(--text-main)", display: "block" }}>{u.email}</strong>
                         <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
-                          ID #{u.id} · {isAdmin ? "SYSTEM ADMINISTRATOR" : "STANDARD TENANT"}
+                          ID #{u.id} · {isItemAdmin ? "SYSTEM ADMINISTRATOR" : "DEVELOPER TENANT"}
                         </span>
                       </div>
                     </td>
@@ -375,7 +369,7 @@ function UsersListPage({
                       </span>
                     </td>
                     <td>
-                      {isAdmin || isUnlimitedRate ? (
+                      {isItemAdmin || isUnlimitedRate ? (
                         <span className="code-badge" style={{ color: "#7c3aed", background: "#f5f3ff", borderColor: "#ddd6fe" }}>
                           ∞ Unlimited
                         </span>
@@ -384,14 +378,14 @@ function UsersListPage({
                       )}
                     </td>
                     <td>
-                      {isAdmin || isUnlimitedDoc ? (
+                      {isItemAdmin || isUnlimitedDoc ? (
                         <span>{(u.config?.doc_used || 0).toLocaleString()} / ∞</span>
                       ) : (
                         <span>{(u.config?.doc_used || 0).toLocaleString()} / {u.config.doc_quota.toLocaleString()}</span>
                       )}
                     </td>
                     <td>
-                      {isAdmin || isUnlimitedStorage ? (
+                      {isItemAdmin || isUnlimitedStorage ? (
                         <span>Unlimited</span>
                       ) : (
                         <span>{formatBytes(u.config.storage_quota_bytes)}</span>
@@ -400,18 +394,15 @@ function UsersListPage({
                     <td>{formatBytes(u.config?.storage_used_bytes || 0)}</td>
                     <td style={{ textAlign: "right" }}>
                       <div style={{ display: "inline-flex", gap: "6px" }}>
-                        <button className="btn btn-primary btn-sm" onClick={() => onSelectUser(u)} title="View and manage API keys">
-                          <Key size={13} />
-                          <span>API Keys</span>
-                        </button>
-                        {!isAdmin && (
+                        {!isItemAdmin ? (
                           <>
                             <button className="btn btn-secondary btn-sm" onClick={() => setEditLimitsUser(u)} title="Configure Rate Limits & Quotas">
                               <Sliders size={13} />
-                              <span>Limits</span>
+                              <span>Set Limits</span>
                             </button>
                             <button className="btn btn-secondary btn-sm" onClick={() => setResetPassUser(u)} title="Reset User Password">
                               <KeyRound size={13} />
+                              <span>Password</span>
                             </button>
                             <button
                               className={`btn btn-ghost btn-sm ${u.disabled ? "btn-primary" : "btn-danger"}`}
@@ -421,6 +412,8 @@ function UsersListPage({
                               {u.disabled ? <UserCheck size={14} /> : <UserX size={14} />}
                             </button>
                           </>
+                        ) : (
+                          <span style={{ fontSize: "12px", color: "var(--text-dim)", padding: "0 8px" }}>Primary Admin</span>
                         )}
                       </div>
                     </td>
@@ -451,37 +444,42 @@ function UsersListPage({
   );
 }
 
-function UserApiKeysPage({
+// ---------------- User Self View: Developer Portal for Own API Keys & Quotas ----------------
+function UserSelfPortal({
   user,
   api,
   notify,
-  onBack,
-  onUserUpdated,
 }: {
   user: User;
   api: (p: string, opt?: RequestInit) => Promise<Response>;
   notify: (m: string) => void;
-  onBack: () => void;
-  onUserUpdated: (u: User) => void;
 }) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [config, setConfig] = useState<UserConfig | undefined>(user.config);
   const [loading, setLoading] = useState(true);
   const [createKeyOpen, setCreateKeyOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<ApiKey | null>(null);
-  const [editLimitsOpen, setEditLimitsOpen] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
 
-  const loadKeys = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
-    const res = await api(`/v1/users/${user.id}/apikeys`);
-    if (res.ok) {
-      const data = await res.json();
+    const [keysRes, cfgRes] = await Promise.all([
+      api(`/v1/users/${user.id}/apikeys`),
+      api(`/v1/users/${user.id}/config`),
+    ]);
+
+    if (keysRes.ok) {
+      const data = await keysRes.json();
       setKeys(data.api_keys || []);
+    }
+    if (cfgRes.ok) {
+      const cfgData = await cfgRes.json();
+      setConfig(cfgData);
     }
     setLoading(false);
   }, [api, user.id]);
 
-  useEffect(() => { loadKeys(); }, [loadKeys]);
+  useEffect(() => { load(); }, [load]);
 
   async function handleCreateKey(name: string, rpm: number) {
     const res = await api(`/v1/users/${user.id}/apikeys`, {
@@ -492,7 +490,7 @@ function UserApiKeysPage({
     if (res.ok) {
       setCreateKeyOpen(false);
       setNewKey(d.key);
-      loadKeys();
+      load();
     } else {
       notify(d.detail || "Failed to create key");
     }
@@ -505,71 +503,59 @@ function UserApiKeysPage({
     });
     if (res.ok) {
       setEditingKey(null);
-      notify("API Key rate limit updated & synchronized");
-      loadKeys();
+      notify("API Key rate limit updated");
+      load();
     } else {
       const d = await res.json().catch(() => ({}));
       notify(d.detail || "Failed to update key limit");
     }
   }
 
-  async function handleSaveAccountLimits(rate: number, quota: number, storageGB: number) {
-    const res = await api(`/v1/users/${user.id}/config`, {
-      method: "PUT",
-      body: JSON.stringify({
-        rate_limit_rpm: rate,
-        doc_quota: quota,
-        storage_quota_bytes: storageGB * 1024 * 1024 * 1024,
-      }),
-    });
-    if (res.ok) {
-      const updatedCfg = await res.json().catch(() => ({}));
-      onUserUpdated({ ...user, config: updatedCfg });
-      setEditLimitsOpen(false);
-      notify("Account limits & quotas updated");
-    } else {
-      notify("Failed to update account limits");
-    }
-  }
-
   async function handleRevoke(k: ApiKey) {
-    if (!window.confirm(`Revoke secret key "${k.name}"? Active workloads using this token will fail immediately.`)) return;
+    if (!window.confirm(`Revoke secret key "${k.name}"? Active workloads using this key will stop working immediately.`)) return;
     const res = await api(`/v1/users/${user.id}/apikeys/${k.id}`, { method: "DELETE" });
     if (res.ok || res.status === 204) {
       notify("API Key revoked");
-      loadKeys();
+      load();
     }
   }
 
-  const isUnlimitedRate = !user.config?.rate_limit_rpm || user.config.rate_limit_rpm === 0;
-  const isUnlimitedDoc = !user.config?.doc_quota || user.config.doc_quota === 0;
-  const isUnlimitedStorage = !user.config?.storage_quota_bytes || user.config.storage_quota_bytes === 0;
+  const [changePassOpen, setChangePassOpen] = useState(false);
+
+  async function handleChangePassword(newPass: string) {
+    const res = await api(`/v1/users/${user.id}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ password: newPass }),
+    });
+    if (res.ok) {
+      setChangePassOpen(false);
+      notify("Password updated successfully");
+    } else {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.detail || "Failed to update password");
+    }
+  }
+
+  const isUnlimitedRate = !config?.rate_limit_rpm || config.rate_limit_rpm === 0;
+  const isUnlimitedDoc = !config?.doc_quota || config.doc_quota === 0;
+  const isUnlimitedStorage = !config?.storage_quota_bytes || config.storage_quota_bytes === 0;
 
   return (
     <>
-      <div style={{ marginBottom: "20px" }}>
-        <button className="btn btn-ghost btn-sm" onClick={onBack} style={{ paddingLeft: 0 }}>
-          <ArrowLeft size={14} />
-          <span>Back to All Accounts</span>
-        </button>
-      </div>
-
       <div className="page-header">
         <div>
           <div className="eyebrow">
             <Key size={12} />
             <span>Developer Credentials</span>
           </div>
-          <h1>{user.email}</h1>
-          <p className="page-desc">Secret keys authenticate OCR requests. You can manage per-key rate limits or adjust total account quotas.</p>
+          <h1>My API Keys & Limits</h1>
+          <p className="page-desc">Generate and manage secret keys to authenticate OCR API requests for your applications.</p>
         </div>
         <div style={{ display: "flex", gap: "10px" }}>
-          {user.role !== "admin" && (
-            <button className="btn btn-secondary" onClick={() => setEditLimitsOpen(true)}>
-              <Sliders size={14} />
-              <span>Edit Account Quotas</span>
-            </button>
-          )}
+          <button className="btn btn-secondary" onClick={() => setChangePassOpen(true)}>
+            <KeyRound size={14} />
+            <span>Change Password</span>
+          </button>
           <button className="btn btn-primary" onClick={() => setCreateKeyOpen(true)}>
             <Plus size={15} />
             <span>Create Secret Key</span>
@@ -578,29 +564,29 @@ function UserApiKeysPage({
       </div>
 
       {/* Account Overview Summary Card */}
-      <div className="panel" style={{ padding: "20px 24px", marginBottom: "24px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "20px", background: "#ffffff" }}>
+      <div className="panel" style={{ padding: "20px 28px", marginBottom: "28px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "24px" }}>
         <div>
           <div style={{ fontSize: "11px", textTransform: "uppercase", color: "var(--text-dim)", fontWeight: 650, marginBottom: "4px" }}>Account Rate Limit</div>
-          <strong style={{ fontSize: "16px", color: isUnlimitedRate ? "#7c3aed" : "var(--text-main)" }}>
-            {isUnlimitedRate ? "∞ Unlimited" : `${user.config?.rate_limit_rpm} RPM`}
+          <strong style={{ fontSize: "17px", color: isUnlimitedRate ? "#7c3aed" : "var(--text-main)" }}>
+            {isUnlimitedRate ? "∞ Unlimited" : `${config?.rate_limit_rpm} RPM`}
           </strong>
         </div>
         <div>
           <div style={{ fontSize: "11px", textTransform: "uppercase", color: "var(--text-dim)", fontWeight: 650, marginBottom: "4px" }}>Document Quota</div>
-          <strong style={{ fontSize: "16px", color: "var(--text-main)" }}>
-            {(user.config?.doc_used || 0).toLocaleString()} / {isUnlimitedDoc ? "∞" : (user.config?.doc_quota || 0).toLocaleString()}
+          <strong style={{ fontSize: "17px", color: "var(--text-main)" }}>
+            {(config?.doc_used || 0).toLocaleString()} / {isUnlimitedDoc ? "∞" : (config?.doc_quota || 0).toLocaleString()}
           </strong>
         </div>
         <div>
           <div style={{ fontSize: "11px", textTransform: "uppercase", color: "var(--text-dim)", fontWeight: 650, marginBottom: "4px" }}>Storage Boundary</div>
-          <strong style={{ fontSize: "16px", color: "var(--text-main)" }}>
-            {isUnlimitedStorage ? "Unlimited" : formatBytes(user.config?.storage_quota_bytes)}
+          <strong style={{ fontSize: "17px", color: "var(--text-main)" }}>
+            {isUnlimitedStorage ? "Unlimited" : formatBytes(config?.storage_quota_bytes)}
           </strong>
         </div>
         <div>
           <div style={{ fontSize: "11px", textTransform: "uppercase", color: "var(--text-dim)", fontWeight: 650, marginBottom: "4px" }}>Storage Utilized</div>
-          <strong style={{ fontSize: "16px", color: "var(--success)" }}>
-            {formatBytes(user.config?.storage_used_bytes || 0)}
+          <strong style={{ fontSize: "17px", color: "var(--success)" }}>
+            {formatBytes(config?.storage_used_bytes || 0)}
           </strong>
         </div>
       </div>
@@ -609,8 +595,8 @@ function UserApiKeysPage({
 
       <div className="panel">
         <div className="panel-header">
-          <span style={{ fontSize: "13px", fontWeight: 650 }}>Issued Secret Keys ({keys.length})</span>
-          <button className="btn btn-ghost btn-sm" onClick={loadKeys}>
+          <span style={{ fontSize: "13px", fontWeight: 650 }}>Active Secret Keys ({keys.length})</span>
+          <button className="btn btn-ghost btn-sm" onClick={load}>
             <RefreshCw size={13} />
             <span>Refresh</span>
           </button>
@@ -618,12 +604,12 @@ function UserApiKeysPage({
         <table className="data-table">
           <thead>
             <tr>
-              <th>Key Label</th>
-              <th>Secret Prefix</th>
+              <th>Key Identifier</th>
+              <th>Key Prefix</th>
               <th>Key Rate Limit</th>
               <th>Created At</th>
               <th>Status</th>
-              <th style={{ textAlign: "right" }}>Manage Key</th>
+              <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -637,7 +623,7 @@ function UserApiKeysPage({
             {!loading && keys.length === 0 && (
               <tr>
                 <td colSpan={6} style={{ textAlign: "center", padding: "40px 20px" }}>
-                  <div style={{ color: "var(--text-dim)", marginBottom: "12px" }}>No secret keys issued for this account yet.</div>
+                  <div style={{ color: "var(--text-dim)", marginBottom: "12px" }}>You have not created any API keys yet.</div>
                   <button className="btn btn-secondary btn-sm" onClick={() => setCreateKeyOpen(true)}>
                     <Plus size={13} />
                     <span>Create first key</span>
@@ -674,7 +660,7 @@ function UserApiKeysPage({
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => setEditingKey(k)}
-                            title="Edit Rate Limit specifically for this key"
+                            title="Edit Rate Limit for this key"
                           >
                             <Sliders size={13} />
                             <span>Limit</span>
@@ -698,7 +684,7 @@ function UserApiKeysPage({
 
       {createKeyOpen && (
         <CreateKeyModal
-          defaultRpm={user.config?.rate_limit_rpm || 60}
+          defaultRpm={config?.rate_limit_rpm || 60}
           onClose={() => setCreateKeyOpen(false)}
           onSubmit={handleCreateKey}
         />
@@ -712,18 +698,19 @@ function UserApiKeysPage({
         />
       )}
 
-      {editLimitsOpen && (
-        <ConfigureLimitsModal
+      {changePassOpen && (
+        <ResetPasswordModal
           user={user}
-          onClose={() => setEditLimitsOpen(false)}
-          onSubmit={handleSaveAccountLimits}
+          onClose={() => setChangePassOpen(false)}
+          onSubmit={handleChangePassword}
+          notify={notify}
         />
       )}
     </>
   );
 }
 
-// Reusable Quota Selector Component with explicit Unlimited vs Custom Limit choice
+// ---------------- Shared Components ----------------
 function QuotaSelector({
   label,
   value,
@@ -853,12 +840,12 @@ function CreateUserModal({ onClose, onSubmit }: { onClose: () => void; onSubmit:
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal-box" style={{ maxWidth: 540 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <h2>Create User Account</h2>
+          <h2>Create Developer Account</h2>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>
             <X size={16} />
           </button>
         </div>
-        <p>Provision a new tenant account with credentials and baseline resource boundaries.</p>
+        <p>Provision a new tenant account with initial limits and credentials.</p>
 
         <form onSubmit={submit}>
           <div className="form-group">
@@ -869,7 +856,7 @@ function CreateUserModal({ onClose, onSubmit }: { onClose: () => void; onSubmit:
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="developer@company.com"
+              placeholder="developer@mezon.ai"
               required
             />
           </div>
@@ -904,7 +891,7 @@ function CreateUserModal({ onClose, onSubmit }: { onClose: () => void; onSubmit:
                 {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
-            <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>Make sure to copy and send this password to the user.</span>
+            <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>Make sure to send this password to the developer so they can log in.</span>
           </div>
 
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: "18px", marginTop: "18px" }}>
@@ -920,7 +907,7 @@ function CreateUserModal({ onClose, onSubmit }: { onClose: () => void; onSubmit:
               Cancel
             </button>
             <button disabled={busy} type="submit" className="btn btn-primary">
-              {busy ? "Provisioning…" : "Create User"}
+              {busy ? "Provisioning…" : "Create Account"}
             </button>
           </div>
         </form>
@@ -955,12 +942,12 @@ function ConfigureLimitsModal({
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal-box" style={{ maxWidth: 500 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <h2>Configure Quotas & Limits</h2>
+          <h2>Configure Resource Limits</h2>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>
             <X size={16} />
           </button>
         </div>
-        <p>Configuring resource boundaries for <strong>{user.email}</strong></p>
+        <p>Set aggregate resource boundaries for <strong>{user.email}</strong></p>
 
         <form onSubmit={submit}>
           <QuotaSelector label="Request Rate Limit" value={rate} unit="RPM" onChange={setRate} />
@@ -1024,7 +1011,7 @@ function ResetPasswordModal({
             <X size={16} />
           </button>
         </div>
-        <p>Set a new secure password for <strong>{user.email}</strong>.</p>
+        <p>Set a new password for <strong>{user.email}</strong>.</p>
 
         <form onSubmit={submit}>
           <div className="form-group">
@@ -1118,7 +1105,7 @@ function CreateKeyModal({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Mobile App Backend, OCR Webhook Worker"
+              placeholder="e.g. Production Webhook Worker, Mobile App Backend"
             />
           </div>
 
@@ -1166,7 +1153,7 @@ function EditKeyLimitModal({
             <X size={16} />
           </button>
         </div>
-        <p>Adjust request rate limit specifically for secret key <strong>{apiKey.name}</strong> ({apiKey.prefix}).</p>
+        <p>Adjust rate limit specifically for key <strong>{apiKey.name}</strong> ({apiKey.prefix}).</p>
         <form onSubmit={submit}>
           <QuotaSelector label="Key Rate Limit" value={rpm} unit="RPM" onChange={setRpm} />
 
@@ -1201,7 +1188,7 @@ function KeyGeneratedBanner({ secretKey, onClose, notify }: { secretKey: string;
         border: "1px solid #86efac",
         borderRadius: "12px",
         padding: "20px 24px",
-        marginBottom: "24px",
+        marginBottom: "28px",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
@@ -1254,19 +1241,19 @@ function Login({ onSubmit }: { onSubmit: (e: string, p: string) => Promise<void>
           </span>
           <div>
             <div style={{ fontWeight: 750, fontSize: 18, color: "var(--text-main)" }}>MacOCR</div>
-            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Cluster Control Plane</div>
+            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Developer & Admin Portal</div>
           </div>
         </div>
         <form onSubmit={submit}>
           <div className="form-group">
-            <label>Administrator Email</label>
+            <label>Email Address</label>
             <input
               autoFocus
               className="form-input"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@dungxbuif.com"
+              placeholder="user@domain.com"
               required
             />
           </div>
@@ -1283,7 +1270,7 @@ function Login({ onSubmit }: { onSubmit: (e: string, p: string) => Promise<void>
           </div>
           {error && <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 16 }}>{error}</div>}
           <button disabled={busy} type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: 8 }}>
-            {busy ? "Authenticating…" : "Sign In to Dashboard"}
+            {busy ? "Signing in…" : "Sign In"}
           </button>
         </form>
       </div>

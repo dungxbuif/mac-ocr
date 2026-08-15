@@ -79,6 +79,16 @@ func NewRouter(
 		c.JSON(http.StatusOK, gin.H{"documents": docList})
 	})
 
+	// User self-service or Admin routes
+	userSession := api.Group("/", adminAuth.RequireSession())
+	userSession.GET("/users/:id/apikeys", auth.ListAPIKeys)
+	userSession.POST("/users/:id/apikeys", auth.CreateAPIKey)
+	userSession.PATCH("/users/:id/apikeys/:kid", auth.UpdateAPIKey)
+	userSession.DELETE("/users/:id/apikeys/:kid", auth.RevokeAPIKey)
+	userSession.POST("/users/:id/reset-password", auth.ResetPassword)
+	userSession.GET("/users/:id/config", auth.GetAccountConfig)
+
+	// Admin-only management routes
 	accountAdmin := api.Group("/", adminAuth.RequireAdminSession())
 	accountAdmin.POST("/users", auth.CreateUser)
 	accountAdmin.GET("/users", auth.ListUsers)
@@ -86,14 +96,8 @@ func NewRouter(
 	accountAdmin.PATCH("/users/:id", auth.UpdateUser)
 	accountAdmin.POST("/users/:id/deactivate", auth.DeactivateUser)
 	accountAdmin.POST("/users/:id/reactivate", auth.ReactivateUser)
-	accountAdmin.POST("/users/:id/reset-password", auth.ResetPassword)
-	accountAdmin.GET("/users/:id/config", auth.GetAccountConfig)
 	accountAdmin.PATCH("/users/:id/config", auth.UpdateAccountConfig)
 	accountAdmin.POST("/users/:id/config/reset-quota", auth.ResetDocQuota)
-	accountAdmin.POST("/users/:id/apikeys", auth.CreateAPIKey)
-	accountAdmin.GET("/users/:id/apikeys", auth.ListAPIKeys)
-	accountAdmin.PATCH("/users/:id/apikeys/:kid", auth.UpdateAPIKey)
-	accountAdmin.DELETE("/users/:id/apikeys/:kid", auth.RevokeAPIKey)
 
 	registerDocRoutes(api.Group("/documents", auth.RequireAPIKey()), doc)
 

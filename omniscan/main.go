@@ -110,8 +110,8 @@ func main() {
 		log.Fatalf("❌ Bot login error: %v", err)
 	}
 
-	log.Printf("✅ OmniScan AI Bot service is running (Daily scan limit: %d/day, Ask limit: %d/session). Press Ctrl+C to exit.",
-		cfg.DailyScanLimit, cfg.SessionAskLimit)
+	log.Printf("✅ OmniScan AI Bot service is running (Scan: %d/day, OCR: %d/day, Ask: %d/session). Press Ctrl+C to exit.",
+		cfg.DailyScanLimit, cfg.DailyOCRLimit, cfg.SessionAskLimit)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
