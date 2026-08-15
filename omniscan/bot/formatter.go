@@ -32,8 +32,8 @@ OmniScan kết hợp công nghệ OCR Apple Silicon tốc độ cao với Trí t
         ▸ *scan "Chỉ trích xuất mã số thuế và số tài khoản" <url>
         ▸ Đính kèm ảnh/PDF trực tiếp rồi gõ *scan
 
-[2] *ocr  —  Trích Xuất Văn Bản Thô (2D Geometric Layout)
-    • Bóc tách nguyên văn 100% ký tự theo chuẩn tọa độ 2 chiều (giữ nguyên hàng, cột, bảng).
+[2] *ocr  —  Trích Xuất Văn Bản Thô
+    • Bóc tách nguyên văn 100% ký tự giữ nguyên hàng, cột, bảng biểu.
     • Tốc độ siêu tốc (<0.5s), không tốn token AI, thích hợp copy mã nguồn, văn bản dài.
         ▸ *ocr <url ảnh/PDF>
         ▸ Đính kèm ảnh/PDF rồi gõ *ocr
@@ -58,7 +58,7 @@ func BuildHelpContent(scanLimit, ocrLimit, askLimit int) mezon.Content {
 	embed := mezon.NewInteractiveBuilder("🤖 OMNISCAN — Hướng dẫn sử dụng AI Document Assistant").
 		SetDescription("Trích xuất, phân loại và hỏi đáp chuyên sâu về tài liệu trực tiếp trên Mezon. Mọi lệnh bắt đầu bằng tiền tố `*`.").
 		AddField("🚀 *scan — Phân tích AI & Bóc tách", "Đọc hiểu tài liệu, lập bảng dữ liệu, tóm tắt & phân tích rủi ro.\n▸ `*scan <url>`\n▸ `*scan \"<prompt yêu cầu>\" <url>` *(ví dụ: *scan \"dịch sang tiếng Anh\" <url>)*\n▸ Đính kèm file ảnh/PDF → gõ `*scan`", false).
-		AddField("⚡ *ocr — Bóc tách thô (2D Layout)", "Trích xuất 100% ký tự nguyên bản giữ nguyên cột bảng hai chiều.\n▸ `*ocr <url>` hoặc đính kèm ảnh/PDF → gõ `*ocr`", false).
+		AddField("⚡ *ocr — Bóc tách văn bản thô", "Trích xuất 100% ký tự nguyên bản giữ nguyên cột bảng hai chiều.\n▸ `*ocr <url>` hoặc đính kèm ảnh/PDF → gõ `*ocr`", false).
 		AddField("💬 Hỏi đáp ngữ cảnh (Quote-Reply)", "Nhấn **Reply** vào bất kỳ tin nhắn nào trong luồng để hỏi tiếp AI.\n▸ Ghi nhớ toàn bộ lịch sử trò chuyện • Đa người dùng tham gia", false).
 		AddField("📊 *quota", "Xem lượt còn lại hôm nay", true).
 		AddField("❓ *os / *omniscan", "Xem bảng hướng dẫn này", true).
@@ -163,14 +163,10 @@ func BuildOCRResult(result *ocr.ResultPayload, reconstructed string, currentCoun
 		truncNote = "\n\n📎 *Văn bản đầy đủ đã được gửi kèm file bên dưới.*"
 	}
 
-	stats := ocr.ComputeStats(result)
-	statsLine := ocr.FormatStats(stats)
-
 	description := "```text\n" + safeBody + "\n```" + truncNote
 
-	embed := mezon.NewInteractiveBuilder("⚡ KẾT QUẢ RAW OCR (2D Layout)").
+	embed := mezon.NewInteractiveBuilder("⚡ KẾT QUẢ RAW OCR").
 		SetDescription(description).
-		AddField("📊 Độ chính xác", statsLine, false).
 		Build()
 	embed["author"] = map[string]any{
 		"name": "⚡ MacOCR Native Engine (Apple Silicon)",

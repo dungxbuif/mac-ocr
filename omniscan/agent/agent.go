@@ -108,6 +108,7 @@ NGUYÊN TẮC:
 			{Role: openai.ChatMessageRoleUser, Content: "Dưới đây là văn bản OCR cần phân tích:\n\n" + ocrText},
 		},
 		Temperature: a.scanTemperature,
+		MaxTokens:   4096,
 	})
 	latency := time.Since(start)
 
@@ -121,6 +122,13 @@ NGUYÊN TẮC:
 	}
 
 	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if content == "" && resp.Choices[0].Message.ReasoningContent != "" {
+		content = strings.TrimSpace(resp.Choices[0].Message.ReasoningContent)
+	}
+	if content == "" {
+		return nil, fmt.Errorf("empty content from LLM model (finish_reason: %s)", resp.Choices[0].FinishReason)
+	}
+
 	docType := "Tài liệu"
 
 	// Parse category tag from first line if present
