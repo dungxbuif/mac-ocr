@@ -550,7 +550,7 @@ func (b *OmniScanBot) sendFileAttachment(channel *mezon.TextChannel, _ *mezon.Ch
 // upload event), so the download is retried with backoff.
 func (b *OmniScanBot) downloadAttachmentBytes(ctx context.Context, url string) ([]byte, error) {
 	maxBytes := b.cfg.MaxAttachmentBytes
-	backoffs := []time.Duration{1 * time.Second, 3 * time.Second, 6 * time.Second}
+	backoffs := []time.Duration{2 * time.Second, 3 * time.Second, 5 * time.Second, 8 * time.Second, 12 * time.Second}
 
 	var lastErr error
 	for attempt := 0; attempt <= len(backoffs); attempt++ {
