@@ -1,6 +1,7 @@
 package ocr
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -8,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,6 +22,20 @@ type Client struct {
 	httpClient   *http.Client
 	pollInterval time.Duration
 	pollTimeout  time.Duration
+
+	// SSE Real-time event streaming
+	sseMu      sync.RWMutex
+	listeners  map[string][]chan sseDocumentEvent
+	sseRunning bool
+	sseCancel  context.CancelFunc
+}
+
+type sseDocumentEvent struct {
+	EventID    string
+	EventType  string
+	DocumentID string
+	Status     string
+	ErrorDetail string
 }
 
 type SubmitResponse struct {
@@ -58,19 +75,18 @@ type ResultPayload struct {
 	Pages     []Page  `json:"pages,omitempty"`
 }
 
-// NewClient builds an OCR proxy client. httpTimeout caps a single HTTP call,
-// pollInterval is the cadence between status checks, and pollTimeout is the
-// total budget for waiting on one document. All three must be > 0; they come
-// from env (OCR_HTTP_TIMEOUT, OCR_POLL_INTERVAL, OCR_POLL_TIMEOUT) so an
-// operator can tune for prod latency without a rebuild.
+// NewClient builds an OCR proxy client with SSE background listener and polling fallback.
 func NewClient(baseURL, apiKey string, httpTimeout, pollInterval, pollTimeout time.Duration) *Client {
-	return &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: httpTimeout},
+	c := &Client{
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		apiKey:       apiKey,
+		httpClient:   &http.Client{Timeout: httpTimeout},
 		pollInterval: pollInterval,
 		pollTimeout:  pollTimeout,
+		listeners:    make(map[string][]chan sseDocumentEvent),
 	}
+	c.startSSEListener()
+	return c
 }
 
 // SubmitAndPoll submits a URL and returns the plain reconstructed text.
@@ -116,8 +132,242 @@ func (c *Client) SubmitAndPollBase64Full(ctx context.Context, data []byte) (*Res
 	return c.pollFull(ctx, docID)
 }
 
-// pollFull polls until the document is done and returns the full *ResultPayload.
+type PresignResponse struct {
+	UploadURL string            `json:"uploadUrl"`
+	SourceURL string            `json:"sourceUrl"`
+	Headers   map[string]string `json:"headers"`
+}
+
+// SubmitAndPollPresignedFull requests an authenticated presigned PUT upload URL
+// from the OCR proxy (/v1/uploads/presign), uploads the raw bytes directly to
+// object storage with exact Content-Length, and then submits the owned sourceUrl.
+// This is optimal for large files (>5MB) where base64 inlining exceeds limits or consumes excess RAM.
+func (c *Client) SubmitAndPollPresignedFull(ctx context.Context, filename, contentType string, data []byte) (*ResultPayload, error) {
+	if filename == "" {
+		filename = "upload.pdf"
+	}
+	if contentType == "" {
+		contentType = "application/pdf"
+	}
+
+	// 1. Request presigned upload URL
+	presignReqBody, err := json.Marshal(map[string]any{
+		"filename":    filename,
+		"sizeBytes":   len(data),
+		"contentType": contentType,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/uploads/presign", bytes.NewReader(presignReqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request presign: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("presign failed status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var presign PresignResponse
+	if err := json.Unmarshal(body, &presign); err != nil {
+		return nil, fmt.Errorf("decode presign response: %w", err)
+	}
+	if presign.UploadURL == "" || presign.SourceURL == "" {
+		return nil, fmt.Errorf("invalid presign response: missing uploadUrl or sourceUrl")
+	}
+	log.Printf("📦 [OCR-PRESIGN] Got uploadUrl, streaming %d bytes to S3...", len(data))
+
+	// 2. Direct PUT to uploadUrl
+	putStart := time.Now()
+	putReq, err := http.NewRequestWithContext(ctx, http.MethodPut, presign.UploadURL, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create PUT request: %w", err)
+	}
+	for k, v := range presign.Headers {
+		putReq.Header.Set(k, v)
+	}
+
+	putResp, err := http.DefaultClient.Do(putReq)
+	if err != nil {
+		return nil, fmt.Errorf("upload to presigned URL: %w", err)
+	}
+	defer putResp.Body.Close()
+	if putResp.StatusCode < 200 || putResp.StatusCode >= 300 {
+		putBody, _ := io.ReadAll(putResp.Body)
+		return nil, fmt.Errorf("upload PUT failed with HTTP %d: %s", putResp.StatusCode, string(putBody))
+	}
+	log.Printf("✅ [OCR-PRESIGN] S3 upload completed in %v, submitting sourceUrl to OCR...", time.Since(putStart))
+
+	// 3. Submit OCR with the returned app-owned sourceUrl
+	return c.SubmitAndPollFull(ctx, presign.SourceURL)
+}
+
+// subscribe registers a channel for SSE document events.
+func (c *Client) subscribe(docID string) chan sseDocumentEvent {
+	c.sseMu.Lock()
+	defer c.sseMu.Unlock()
+	ch := make(chan sseDocumentEvent, 2)
+	c.listeners[docID] = append(c.listeners[docID], ch)
+	return ch
+}
+
+// unsubscribe removes a listener channel for a document.
+func (c *Client) unsubscribe(docID string, ch chan sseDocumentEvent) {
+	c.sseMu.Lock()
+	defer c.sseMu.Unlock()
+	list := c.listeners[docID]
+	for i, listener := range list {
+		if listener == ch {
+			c.listeners[docID] = append(list[:i], list[i+1:]...)
+			break
+		}
+	}
+	if len(c.listeners[docID]) == 0 {
+		delete(c.listeners, docID)
+	}
+}
+
+// broadcastEvent delivers an SSE event to any awaiting listeners for this document.
+func (c *Client) broadcastEvent(evt sseDocumentEvent) {
+	c.sseMu.RLock()
+	defer c.sseMu.RUnlock()
+	if listeners, ok := c.listeners[evt.DocumentID]; ok {
+		for _, ch := range listeners {
+			select {
+			case ch <- evt:
+			default:
+			}
+		}
+	}
+}
+
+// startSSEListener maintains a persistent SSE stream to /v1/events in the background.
+func (c *Client) startSSEListener() {
+	if c.apiKey == "" {
+		return
+	}
+	c.sseMu.Lock()
+	if c.sseRunning {
+		c.sseMu.Unlock()
+		return
+	}
+	c.sseRunning = true
+	ctx, cancel := context.WithCancel(context.Background())
+	c.sseCancel = cancel
+	c.sseMu.Unlock()
+
+	go func() {
+		defer func() {
+			c.sseMu.Lock()
+			c.sseRunning = false
+			c.sseMu.Unlock()
+		}()
+
+		cursor := ""
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			sseURL := c.baseURL + "/v1/events"
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, sseURL, nil)
+			if err != nil {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			req.Header.Set("Authorization", "Bearer "+c.apiKey)
+			req.Header.Set("Accept", "text/event-stream")
+			if cursor != "" {
+				req.Header.Set("Last-Event-ID", cursor)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			log.Printf("📡 [OCR-SSE] Connected real-time event stream to %s", sseURL)
+			reader := bufio.NewReader(resp.Body)
+			var currentID, currentEvent, currentData string
+
+			for {
+				lineBytes, err := reader.ReadBytes('\n')
+				if err != nil {
+					resp.Body.Close()
+					break
+				}
+				line := strings.TrimRight(string(lineBytes), "\r\n")
+
+				if line == "" {
+					// Dispatch event
+					if currentData != "" {
+						var parsed struct {
+							DocumentID  string `json:"documentId"`
+							Status      string `json:"status"`
+							ErrorDetail string `json:"errorDetail"`
+						}
+						if err := json.Unmarshal([]byte(currentData), &parsed); err == nil && parsed.DocumentID != "" {
+							log.Printf("⚡ [OCR-SSE] Push event: doc=%s status=%s", parsed.DocumentID, parsed.Status)
+							c.broadcastEvent(sseDocumentEvent{
+								EventID:     currentID,
+								EventType:   currentEvent,
+								DocumentID:  parsed.DocumentID,
+								Status:      parsed.Status,
+								ErrorDetail: parsed.ErrorDetail,
+							})
+						}
+					}
+					currentID = ""
+					currentEvent = ""
+					currentData = ""
+					continue
+				}
+
+				if strings.HasPrefix(line, "id:") {
+					currentID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+					cursor = currentID
+				} else if strings.HasPrefix(line, "event:") {
+					currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+				} else if strings.HasPrefix(line, "data:") {
+					dataVal := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+					if currentData == "" {
+						currentData = dataVal
+					} else {
+						currentData += "\n" + dataVal
+					}
+				}
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}()
+}
+
+// pollFull waits for document completion using Real-Time SSE push events with polling fallback.
 func (c *Client) pollFull(ctx context.Context, docID string) (*ResultPayload, error) {
+	sseChan := c.subscribe(docID)
+	defer c.unsubscribe(docID, sseChan)
+
 	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
 
@@ -129,7 +379,21 @@ func (c *Client) pollFull(ctx context.Context, docID string) (*ResultPayload, er
 			return nil, ctx.Err()
 		case <-timeout:
 			return nil, fmt.Errorf("OCR processing timed out after %s", c.pollTimeout)
+		case evt := <-sseChan:
+			// Instant real-time push event from SSE!
+			if evt.Status == "completed" {
+				doc, err := c.GetDocument(ctx, docID)
+				if err == nil && doc.Result != nil {
+					return doc.Result, nil
+				}
+			} else if evt.Status == "failed" {
+				if evt.ErrorDetail != "" {
+					return nil, fmt.Errorf("OCR processing failed: %s", evt.ErrorDetail)
+				}
+				return nil, errors.New("OCR processing failed")
+			}
 		case <-ticker.C:
+			// Fallback polling
 			doc, err := c.GetDocument(ctx, docID)
 			if err != nil {
 				return nil, fmt.Errorf("poll OCR status: %w", err)
@@ -155,7 +419,7 @@ func (c *Client) pollFull(ctx context.Context, docID string) (*ResultPayload, er
 	}
 }
 
-// SubmitDocument submits a URL-based OCR request.
+// SubmitDocument submits a URL-based OCR request with SSE notification.
 func (c *Client) SubmitDocument(ctx context.Context, inputURL string) (string, error) {
 	reqBody, err := json.Marshal(map[string]any{
 		"input": map[string]string{
@@ -167,6 +431,9 @@ func (c *Client) SubmitDocument(ctx context.Context, inputURL string) (string, e
 			"automaticallyDetectsLanguage": true,
 			"usesLanguageCorrection":       true,
 		},
+		"notification": map[string]string{
+			"type": "sse",
+		},
 	})
 	if err != nil {
 		return "", err
@@ -174,12 +441,7 @@ func (c *Client) SubmitDocument(ctx context.Context, inputURL string) (string, e
 	return c.submit(ctx, reqBody)
 }
 
-// SubmitDocumentBase64 submits raw bytes as a base64 data payload. The proxy
-// stores them directly and queues OCR, so the request succeeds regardless of
-// whether the proxy host can fetch URLs from cdn.komu.vn. The proxy sniffs the
-// MIME type via DetectMIME, so we only send the "base64" field; sending any
-// extra field (e.g. mimeType) triggers a 400 "unknown field" because the proxy
-// uses DisallowUnknownFields.
+// SubmitDocumentBase64 submits raw bytes as a base64 data payload with SSE notification.
 func (c *Client) SubmitDocumentBase64(ctx context.Context, data []byte) (string, error) {
 	reqBody, err := json.Marshal(map[string]any{
 		"input": map[string]any{
@@ -190,6 +452,9 @@ func (c *Client) SubmitDocumentBase64(ctx context.Context, data []byte) (string,
 			"languages":                    []string{"vi-VN", "en-US"},
 			"automaticallyDetectsLanguage": true,
 			"usesLanguageCorrection":       true,
+		},
+		"notification": map[string]string{
+			"type": "sse",
 		},
 	})
 	if err != nil {

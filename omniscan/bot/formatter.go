@@ -293,3 +293,39 @@ func ParseScanArgs(input string) ScanArgs {
 }
 
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
+
+// FormatFriendlyOCRError maps raw technical errors from OCR proxy / validation into
+// polite, clear, user-friendly Vietnamese messages.
+func FormatFriendlyOCRError(err error) string {
+	if err == nil {
+		return "Đã xảy ra lỗi không xác định."
+	}
+	errStr := err.Error()
+
+	// Check if PDF exceeds max page limit (200 pages)
+	if strings.Contains(errStr, "PDF exceeds") || strings.Contains(errStr, "exceeds 200 pages") || (strings.Contains(errStr, "exceeds") && strings.Contains(errStr, "pages")) {
+		return "⚠️ **Tài liệu vượt quá giới hạn trang:** OmniScan hiện hỗ trợ file PDF tối đa **200 trang/tài liệu** để đảm bảo tốc độ phản hồi nhanh nhất cho mọi người. Bạn vui lòng chia nhỏ file PDF thành các phần nhỏ hơn và gửi lại nhé! *(Đã hoàn lại 1 lượt)*"
+	}
+
+	// Check if payload or file size too large (>100MB)
+	if strings.Contains(errStr, "PAYLOAD_TOO_LARGE") || strings.Contains(errStr, "URL_CONTENT_TOO_LARGE") || strings.Contains(errStr, "too large") {
+		return "⚠️ **Dung lượng file quá lớn:** Hệ thống hỗ trợ file tối đa **100 MB**. Bạn vui lòng nén dung lượng hoặc chia nhỏ file và gửi lại nhé! *(Đã hoàn lại 1 lượt)*"
+	}
+
+	// Check if file is unsupported or corrupted
+	if strings.Contains(errStr, "UNSUPPORTED_MEDIA_TYPE") || strings.Contains(errStr, "unsupported media") {
+		return "⚠️ **Định dạng file không được hỗ trợ:** OmniScan hiện hỗ trợ các định dạng ảnh (`PNG`, `JPEG`, `WebP`, `TIFF`) và file tài liệu (`PDF`). Bạn vui lòng kiểm tra lại file nhé! *(Đã hoàn lại 1 lượt)*"
+	}
+
+	if strings.Contains(errStr, "malformed or protected") || strings.Contains(errStr, "protected content") {
+		return "⚠️ **File PDF bị khóa mật khẩu hoặc bị lỗi cấu trúc:** OmniScan không thể đọc các file PDF có đặt mật khẩu bảo vệ. Bạn vui lòng mở khóa file PDF trước khi quét nhé! *(Đã hoàn lại 1 lượt)*"
+	}
+
+	// Check if timeout / deadline exceeded
+	if strings.Contains(errStr, "deadline exceeded") || strings.Contains(errStr, "timed out") {
+		return "⏱️ **Hết thời gian chờ xử lý (Timeout):** Tài liệu này quá dài hoặc có quá nhiều trang nên chưa kịp hoàn tất trong thời gian quy định. Bạn vui lòng chia nhỏ file PDF và thử lại nhé! *(Đã hoàn lại 1 lượt)*"
+	}
+
+	// Default fallback
+	return fmt.Sprintf("❌ **Lỗi xử lý OCR:** %v *(Đã hoàn lại 1 lượt)*", err)
+}

@@ -28,7 +28,7 @@ const (
 	MaxImagePixels      = 40_000_000
 	MaxCustomWordBytes  = 128
 	MaxCustomWordsBytes = 8 * 1024
-	MaxPDFPages         = 500
+	MaxPDFPages         = 200
 )
 
 var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$`)

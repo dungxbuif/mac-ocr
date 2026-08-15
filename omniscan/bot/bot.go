@@ -271,7 +271,7 @@ func (b *OmniScanBot) setupHandlers() {
 				if err != nil {
 					log.Printf("❌ OCR Error: %v. Refunded quota.", err)
 					_ = b.store.RefundOCRQuota(userID)
-					b.sendReply(channel, msg, fmt.Sprintf("❌ **Lỗi xử lý OCR:** %v (Đã hoàn 1 lượt)", err))
+					b.sendReply(channel, msg, FormatFriendlyOCRError(err))
 					return
 				}
 
@@ -315,10 +315,25 @@ func (b *OmniScanBot) setupHandlers() {
 			if err != nil {
 				log.Printf("❌ OCR Error: %v. Refunded quota.", err)
 				_ = b.store.RefundScanQuota(userID)
-				b.sendReply(channel, msg, fmt.Sprintf("❌ **Lỗi xử lý OCR:** %v (Đã hoàn 1 lượt)", err))
+				b.sendReply(channel, msg, FormatFriendlyOCRError(err))
 				return
 			}
 			reconstructed := ocrlib.ReconstructLayout(result)
+
+			// Guard: If document is too large (> 30 pages or > 25,000 characters),
+			// LLM context window would explode/timeout. Refund scan quota and deliver raw OCR!
+			if result.PageCount > 30 || len(reconstructed) > 25000 {
+				log.Printf("⚠️ [AI-SCAN] Document too large (%d pages, %d chars). Refunding scan quota and switching to Raw OCR.", result.PageCount, len(reconstructed))
+				_ = b.store.RefundScanQuota(userID)
+				b.sendReply(channel, msg, fmt.Sprintf("📚 **Tài liệu quá lớn (%d trang, %d ký tự):** Vượt quá giới hạn phân tích AI trực tiếp (tối đa 30 trang). Hệ thống tự động bóc tách **Raw OCR** và **đã hoàn lại 1 lượt Scan** cho bạn!", result.PageCount, len(reconstructed)))
+
+				out := BuildOCRResult(result, reconstructed, currentCount, scanLimit)
+				sentFallback, _ := b.sendReplyContent(channel, msg, out.Content)
+				if sentFallback != nil && sentFallback.ID != "" {
+					_ = b.sessionStore.CreateSession(sentFallback.ID, userID, "doc", "Raw OCR", reconstructed)
+				}
+				return
+			}
 
 			_, _, askLimit := b.getUserLimits(userID)
 
@@ -621,6 +636,26 @@ func (b *OmniScanBot) submitOCRFull(ctx context.Context, urlToScan string, asAtt
 		}
 		log.Printf("✅ [OCR-DOWNLOAD] bytes=%d latency=%v", len(data), dlLatency)
 
+		filename := "document.pdf"
+		if strings.HasSuffix(strings.ToLower(urlToScan), ".png") {
+			filename = "image.png"
+		} else if strings.HasSuffix(strings.ToLower(urlToScan), ".jpg") || strings.HasSuffix(strings.ToLower(urlToScan), ".jpeg") {
+			filename = "image.jpg"
+		}
+
+		// If file is large (> 5 MB), use Presigned S3 Upload to avoid huge Base64 JSON payloads
+		if len(data) > 5*1024*1024 {
+			log.Printf("📦 [OCR-PIPELINE] Large file (%d bytes > 5MB), using Presigned S3 upload...", len(data))
+			presignStart := time.Now()
+			res, err := b.ocrClient.SubmitAndPollPresignedFull(ctx, filename, "application/pdf", data)
+			if err == nil {
+				log.Printf("✅ [OCR-PIPELINE] mode=presign total_latency=%v (dl=%v presign_ocr=%v) pages=%d text_len=%d",
+					time.Since(start), dlLatency, time.Since(presignStart), res.PageCount, len(res.Text))
+				return res, nil
+			}
+			log.Printf("⚠️ [OCR-PIPELINE] Presign upload failed (%v), falling back to Base64 submit...", err)
+		}
+
 		ocrStart := time.Now()
 		res, err := b.ocrClient.SubmitAndPollBase64Full(ctx, data)
 		ocrLatency := time.Since(ocrStart)
@@ -642,10 +677,18 @@ func (b *OmniScanBot) submitOCRFull(ctx context.Context, urlToScan string, asAtt
 	}
 
 	log.Printf("⚠️ [OCR-PIPELINE] mode=url failed (%v), retrying via bot host download fallback...", err)
-	// Fallback to bot host download + base64 submit
+	// Fallback to bot host download + presign/base64 submit
 	data, dlErr := b.downloadAttachmentBytes(ctx, urlToScan)
 	if dlErr != nil {
 		return nil, fmt.Errorf("submit OCR: %w (fallback download failed: %v)", err, dlErr)
 	}
+
+	if len(data) > 5*1024*1024 {
+		resPresign, errPresign := b.ocrClient.SubmitAndPollPresignedFull(ctx, "document.pdf", "application/pdf", data)
+		if errPresign == nil {
+			return resPresign, nil
+		}
+	}
+
 	return b.ocrClient.SubmitAndPollBase64Full(ctx, data)
 }
