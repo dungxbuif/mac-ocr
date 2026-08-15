@@ -109,7 +109,10 @@ func (b *OmniScanBot) upgradeOCRToScan(channel *mezon.TextChannel, userID string
 			log.Printf("❌ [upgrade] send embed: %v", sendErr)
 		}
 		if len(out.FileBytes) > 0 {
-			_ = b.sendFileAttachment(channel, nil, out.FileName, out.FileBytes, "📎 Kết quả AI đầy đủ (Markdown):")
+			fileMsg, _ := b.sendFileAttachment(channel, nil, out.FileName, out.FileBytes, "📎 Kết quả AI đầy đủ (Markdown):")
+			if fileMsg != nil && fileMsg.ID != "" {
+				_ = b.sessionStore.CreateSession(fileMsg.ID, userID, s.DocumentID, res.DocType, s.OCRText)
+			}
 		}
 		if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
 			_ = b.sessionStore.CreateSession(sentMsg.ID, userID, s.DocumentID, res.DocType, s.OCRText)

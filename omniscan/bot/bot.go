@@ -284,12 +284,18 @@ func (b *OmniScanBot) setupHandlers() {
 				// If text was too long, send the .txt file as a follow-up
 				if len(out.FileBytes) > 0 {
 					attachMsg := fmt.Sprintf("📎 Văn bản OCR đầy đủ (%d ký tự) — tải về để xem:", len([]rune(string(out.FileBytes))))
-					_ = b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, attachMsg)
+					fileMsg, _ := b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, attachMsg)
+					if fileMsg != nil && fileMsg.ID != "" {
+						_ = b.sessionStore.CreateSession(fileMsg.ID, userID, "doc", "Raw OCR", reconstructed)
+					}
 				}
 
 				// Save session for optional follow-up Q&A on the OCR result
 				if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
 					_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", "Raw OCR", reconstructed)
+				}
+				if msg.ID != "" {
+					_ = b.sessionStore.CreateSession(msg.ID, userID, "doc", "Raw OCR", reconstructed)
 				}
 			}(m, targetURL, m.SenderID, isAttachment)
 			return
@@ -332,7 +338,10 @@ func (b *OmniScanBot) setupHandlers() {
 				out := BuildOCRResult(result, reconstructed, currentCount, scanLimit)
 				b.sendReplyContent(channel, msg, out.Content)
 				if len(out.FileBytes) > 0 {
-					_ = b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, "📎 Văn bản OCR đầy đủ:")
+					fileMsg, _ := b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, "📎 Văn bản OCR đầy đủ:")
+					if fileMsg != nil && fileMsg.ID != "" {
+						_ = b.sessionStore.CreateSession(fileMsg.ID, userID, "doc", "Raw OCR", reconstructed)
+					}
 				}
 				return
 			}
@@ -343,11 +352,17 @@ func (b *OmniScanBot) setupHandlers() {
 
 			// If AI output was very long, also send it as a .md file
 			if len(out.FileBytes) > 0 {
-				_ = b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, "📎 Kết quả AI đầy đủ (Markdown):")
+				fileMsg, _ := b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, "📎 Kết quả AI đầy đủ (Markdown):")
+				if fileMsg != nil && fileMsg.ID != "" {
+					_ = b.sessionStore.CreateSession(fileMsg.ID, userID, "doc", res.DocType, reconstructed)
+				}
 			}
 
 			if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
 				_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", res.DocType, reconstructed)
+			}
+			if msg.ID != "" {
+				_ = b.sessionStore.CreateSession(msg.ID, userID, "doc", res.DocType, reconstructed)
 			}
 		}(m, targetURL, m.SenderID, customPrompt, isAttachment)
 	})
@@ -373,7 +388,13 @@ func (b *OmniScanBot) handleThreadQuestion(channel *mezon.TextChannel, m *mezon.
 		}
 	}
 
-	b.sendReply(channel, m, fmt.Sprintf("💭 🧠 AI đang suy nghĩ câu trả lời (Câu %d/%d)...", askCount, askLimit))
+	thinkingMsg, _ := b.sendReply(channel, m, fmt.Sprintf("💭 🧠 AI đang suy nghĩ câu trả lời (Câu %d/%d)...", askCount, askLimit))
+	if thinkingMsg != nil && thinkingMsg.ID != "" {
+		_ = b.sessionStore.CreateSession(thinkingMsg.ID, sess.UserID, sess.DocumentID, sess.DocType, sess.OCRText)
+	}
+	if m.ID != "" {
+		_ = b.sessionStore.CreateSession(m.ID, sess.UserID, sess.DocumentID, sess.DocType, sess.OCRText)
+	}
 
 	go func(msg *mezon.ChannelMessage, s *storage.ScanSession, q string, currentAsk, userAskLimit int) {
 		ctx, cancel := context.WithTimeout(context.Background(), b.cfg.QATimeout)
@@ -389,11 +410,7 @@ func (b *OmniScanBot) handleThreadQuestion(channel *mezon.TextChannel, m *mezon.
 		replyText := fmt.Sprintf("💡 **TRẢ LỜI (Câu %d/%d):**\n%s", currentAsk, userAskLimit, answer)
 		sentMsg, err := b.sendReply(channel, msg, replyText)
 		if err == nil && sentMsg != nil && sentMsg.ID != "" {
-			if currentAsk < userAskLimit {
-				_ = b.sessionStore.CreateSession(sentMsg.ID, s.UserID, s.DocumentID, s.DocType, s.OCRText)
-			} else {
-				_ = b.sessionStore.DeleteSession(s.SessionID)
-			}
+			_ = b.sessionStore.CreateSession(sentMsg.ID, s.UserID, s.DocumentID, s.DocType, s.OCRText)
 		}
 	}(m, sess, question, askCount, askLimit)
 }
@@ -517,9 +534,9 @@ func firstNonEmptyName(m *mezon.ChannelMessage) string {
 // sendFileAttachment sends fileBytes as a file or inline code-block fallback.
 // Mezon's current SDK does not expose a file-upload API, so we always fall back
 // to sending the content inline (truncated to 3 000 runes to stay within limits).
-func (b *OmniScanBot) sendFileAttachment(channel *mezon.TextChannel, _ *mezon.ChannelMessage, filename string, data []byte, caption string) error {
+func (b *OmniScanBot) sendFileAttachment(channel *mezon.TextChannel, _ *mezon.ChannelMessage, filename string, data []byte, caption string) (*mezon.Message, error) {
 	if len(data) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	runes := []rune(string(data))
@@ -535,8 +552,7 @@ func (b *OmniScanBot) sendFileAttachment(channel *mezon.TextChannel, _ *mezon.Ch
 	}
 
 	body := fmt.Sprintf("%s\n```\n%s\n```%s", caption, string(runes), note)
-	_, err := channel.Send(mezon.Text(body), nil)
-	return err
+	return channel.Send(mezon.Text(body), nil)
 }
 
 // downloadAttachmentBytes fetches the attachment URL on the bot host (same
