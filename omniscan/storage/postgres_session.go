@@ -8,30 +8,35 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PostgresSessionStore persists threaded Q&A sessions in PostgreSQL so they
-// survive across replicas. It mirrors the SQLite store but drops the
-// in-process mutex (Postgres row locks make CheckAndIncrementAskQuota safe)
-// and the goroutine cleanup loop (replaced by a 24h TTL sweep query).
+// PostgresSessionStore implements SessionStore on top of PostgreSQL, keeping
+// Q&A context alive across multiple pods without sticky routing. No in-process
+// mutex is needed because PostgreSQL row-level locks guarantee safe concurrent
+// ask counting.
 type PostgresSessionStore struct {
 	pool *pgxpool.Pool
 }
 
-func NewPostgresSessionStore(ctx context.Context, databaseURL string) (*PostgresSessionStore, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+func NewPostgresSessionStore(ctx context.Context, connString string) (*PostgresSessionStore, error) {
+	cfg, err := pgxpool.ParseConfig(connString)
 	if err != nil {
-		return nil, fmt.Errorf("open postgres session pool: %w", err)
+		return nil, fmt.Errorf("parse postgres session url: %w", err)
 	}
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
+	cfg.MaxConns = 10
+	cfg.MinConns = 2
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("connect postgres sessions: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("ping postgres: %w", err)
+		return nil, fmt.Errorf("ping postgres sessions: %w", err)
 	}
 
 	store := &PostgresSessionStore{pool: pool}
 	if err := store.migrate(ctx); err != nil {
 		pool.Close()
-		return nil, err
+		return nil, fmt.Errorf("migrate session schema: %w", err)
 	}
 	return store, nil
 }
@@ -46,20 +51,29 @@ CREATE TABLE IF NOT EXISTS scan_sessions (
     ask_count   INTEGER NOT NULL DEFAULT 0,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS user_session_asks (
+    session_id  TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    ask_count   INTEGER NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (session_id, user_id)
+);
 CREATE INDEX IF NOT EXISTS idx_scan_sessions_user ON scan_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_scan_sessions_created ON scan_sessions(created_at);
+CREATE INDEX IF NOT EXISTS idx_user_session_asks_user ON user_session_asks(user_id);
 `
 
 func (s *PostgresSessionStore) migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, pgSessionSchema); err != nil {
 		return fmt.Errorf("apply session schema: %w", err)
 	}
-	// Sweep stale rows on every start, port of the SQLite hourly cleanup
-	// collapsed into one shot: a periodic sweeper would still help, but this
-	// bounds unbounded growth at least across restarts.
 	if _, err := s.pool.Exec(ctx,
 		`DELETE FROM scan_sessions WHERE created_at < now() - INTERVAL '24 hours'`); err != nil {
 		return fmt.Errorf("sweep stale sessions: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM user_session_asks WHERE updated_at < now() - INTERVAL '24 hours'`); err != nil {
+		return fmt.Errorf("sweep stale user asks: %w", err)
 	}
 	return nil
 }
@@ -94,7 +108,10 @@ func (s *PostgresSessionStore) GetSession(sessionID string) (*ScanSession, error
 	return &sess, nil
 }
 
-func (s *PostgresSessionStore) CheckAndIncrementAskQuota(sessionID string, maxAsks int) (bool, int, error) {
+// CheckAndIncrementAskQuota checks and increments the ask count for the asking user
+// on a given session. This allows other users in the channel to also ask questions
+// without exhausting the original scanner's quota.
+func (s *PostgresSessionStore) CheckAndIncrementAskQuota(sessionID, userID string, maxAsks int) (bool, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -104,32 +121,41 @@ func (s *PostgresSessionStore) CheckAndIncrementAskQuota(sessionID string, maxAs
 	}
 	defer tx.Rollback(ctx)
 
-	var askCount int
-	err = tx.QueryRow(ctx, `SELECT ask_count FROM scan_sessions WHERE session_id = $1 FOR UPDATE`,
-		sessionID).Scan(&askCount)
+	// Verify session exists
+	var dummy string
+	err = tx.QueryRow(ctx, `SELECT session_id FROM scan_sessions WHERE session_id = $1`, sessionID).Scan(&dummy)
 	if isNoRows(err) {
 		return false, 0, nil
 	} else if err != nil {
 		return false, 0, err
 	}
 
-	if askCount >= maxAsks {
-		// Session completed max asks: purge OCR text immediately for privacy,
-		// mirroring the SQLite store's behaviour.
-		if _, err := tx.Exec(ctx, `DELETE FROM scan_sessions WHERE session_id = $1`, sessionID); err != nil {
-			return false, 0, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return false, 0, err
-		}
-		return false, askCount, nil
-	}
-
-	newAsk := askCount + 1
-	if _, err := tx.Exec(ctx, `UPDATE scan_sessions SET ask_count = $2 WHERE session_id = $1`,
-		sessionID, newAsk); err != nil {
+	var userAskCount int
+	err = tx.QueryRow(ctx, `
+		SELECT ask_count FROM user_session_asks WHERE session_id = $1 AND user_id = $2 FOR UPDATE
+	`, sessionID, userID).Scan(&userAskCount)
+	if isNoRows(err) {
+		userAskCount = 0
+	} else if err != nil {
 		return false, 0, err
 	}
+
+	if userAskCount >= maxAsks {
+		return false, userAskCount, nil
+	}
+
+	newAsk := userAskCount + 1
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_session_asks (session_id, user_id, ask_count, updated_at)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (session_id, user_id) DO UPDATE SET ask_count = $3, updated_at = now()
+	`, sessionID, userID, newAsk); err != nil {
+		return false, 0, err
+	}
+
+	// Update overall session count for reporting
+	_, _ = tx.Exec(ctx, `UPDATE scan_sessions SET ask_count = ask_count + 1 WHERE session_id = $1`, sessionID)
+
 	if err := tx.Commit(ctx); err != nil {
 		return false, 0, err
 	}
@@ -139,6 +165,7 @@ func (s *PostgresSessionStore) CheckAndIncrementAskQuota(sessionID string, maxAs
 func (s *PostgresSessionStore) DeleteSession(sessionID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	_, _ = s.pool.Exec(ctx, `DELETE FROM user_session_asks WHERE session_id = $1`, sessionID)
 	_, err := s.pool.Exec(ctx, `DELETE FROM scan_sessions WHERE session_id = $1`, sessionID)
 	return err
 }

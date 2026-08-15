@@ -375,7 +375,7 @@ func (b *OmniScanBot) handleThreadQuestion(channel *mezon.TextChannel, m *mezon.
 	var askCount int = 1
 	var err error
 	if !isUnlimitedUser(m.SenderID) {
-		allowed, askCount, err = b.sessionStore.CheckAndIncrementAskQuota(sess.SessionID, askLimit)
+		allowed, askCount, err = b.sessionStore.CheckAndIncrementAskQuota(sess.SessionID, m.SenderID, askLimit)
 		if err != nil {
 			log.Printf("❌ Ask quota error: %v", err)
 			b.sendReply(channel, m, "⚠️ Có lỗi xảy ra khi kiểm tra số câu hỏi.")

@@ -10,7 +10,7 @@ import (
 )
 
 type ScanSession struct {
-	SessionID  string // Bot reply message_id
+	SessionID  string
 	UserID     string
 	DocumentID string
 	DocType    string
@@ -22,7 +22,7 @@ type ScanSession struct {
 type SessionStore interface {
 	CreateSession(sessionID, userID, documentID, docType, ocrText string) error
 	GetSession(sessionID string) (*ScanSession, error)
-	CheckAndIncrementAskQuota(sessionID string, maxAsks int) (allowed bool, currentAsk int, err error)
+	CheckAndIncrementAskQuota(sessionID, userID string, maxAsks int) (allowed bool, currentAsk int, err error)
 	DeleteSession(sessionID string) error
 	Close() error
 }
@@ -47,6 +47,13 @@ func NewSQLiteSessionStore(dbPath string) (*SQLiteSessionStore, error) {
 		ocr_text TEXT NOT NULL,
 		ask_count INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS user_session_asks (
+		session_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		ask_count INTEGER NOT NULL DEFAULT 0,
+		updated_at DATETIME NOT NULL,
+		PRIMARY KEY (session_id, user_id)
 	);
 	`
 	if _, err := db.Exec(schema); err != nil {
@@ -87,7 +94,10 @@ func (s *SQLiteSessionStore) GetSession(sessionID string) (*ScanSession, error) 
 	return &sess, nil
 }
 
-func (s *SQLiteSessionStore) CheckAndIncrementAskQuota(sessionID string, maxAsks int) (bool, int, error) {
+// CheckAndIncrementAskQuota checks and increments the ask count for a specific user
+// on a given session. This allows other users in the channel to also ask questions
+// on a scanned document without exhausting or affecting the original owner's quota.
+func (s *SQLiteSessionStore) CheckAndIncrementAskQuota(sessionID, userID string, maxAsks int) (bool, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -97,26 +107,39 @@ func (s *SQLiteSessionStore) CheckAndIncrementAskQuota(sessionID string, maxAsks
 	}
 	defer tx.Rollback()
 
-	var askCount int
-	err = tx.QueryRow("SELECT ask_count FROM scan_sessions WHERE session_id = ?", sessionID).Scan(&askCount)
+	// Verify session exists
+	var dummy string
+	err = tx.QueryRow("SELECT session_id FROM scan_sessions WHERE session_id = ?", sessionID).Scan(&dummy)
 	if err == sql.ErrNoRows {
 		return false, 0, nil
 	} else if err != nil {
 		return false, 0, err
 	}
 
-	if askCount >= maxAsks {
-		// Session completed max asks -> purge session data immediately for privacy
-		_, _ = tx.Exec("DELETE FROM scan_sessions WHERE session_id = ?", sessionID)
-		_ = tx.Commit()
-		return false, askCount, nil
+	var userAskCount int
+	err = tx.QueryRow("SELECT ask_count FROM user_session_asks WHERE session_id = ? AND user_id = ?", sessionID, userID).Scan(&userAskCount)
+	if err == sql.ErrNoRows {
+		userAskCount = 0
+	} else if err != nil {
+		return false, 0, err
 	}
 
-	newAsk := askCount + 1
-	_, err = tx.Exec("UPDATE scan_sessions SET ask_count = ? WHERE session_id = ?", newAsk, sessionID)
+	if userAskCount >= maxAsks {
+		return false, userAskCount, nil
+	}
+
+	newAsk := userAskCount + 1
+	_, err = tx.Exec(`
+		INSERT INTO user_session_asks (session_id, user_id, ask_count, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(session_id, user_id) DO UPDATE SET ask_count = ?, updated_at = ?
+	`, sessionID, userID, newAsk, time.Now(), newAsk, time.Now())
 	if err != nil {
 		return false, 0, err
 	}
+
+	// Update overall session counter too
+	_, _ = tx.Exec("UPDATE scan_sessions SET ask_count = ask_count + 1 WHERE session_id = ?", sessionID)
 
 	if err := tx.Commit(); err != nil {
 		return false, 0, err
@@ -129,6 +152,7 @@ func (s *SQLiteSessionStore) DeleteSession(sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	_, _ = s.db.Exec("DELETE FROM user_session_asks WHERE session_id = ?", sessionID)
 	_, err := s.db.Exec("DELETE FROM scan_sessions WHERE session_id = ?", sessionID)
 	return err
 }
@@ -139,6 +163,7 @@ func (s *SQLiteSessionStore) startAutoCleanup(ttl time.Duration) {
 		s.mu.Lock()
 		cutoff := time.Now().Add(-ttl)
 		_, _ = s.db.Exec("DELETE FROM scan_sessions WHERE created_at < ?", cutoff)
+		_, _ = s.db.Exec("DELETE FROM user_session_asks WHERE updated_at < ?", cutoff)
 		s.mu.Unlock()
 	}
 }
