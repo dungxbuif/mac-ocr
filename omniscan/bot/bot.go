@@ -281,15 +281,6 @@ func (b *OmniScanBot) setupHandlers() {
 				// Deliver embed card
 				sentMsg, sendErr := b.sendReplyContent(channel, msg, out.Content)
 
-				// If text was too long, send the .txt file as a follow-up
-				if len(out.FileBytes) > 0 {
-					attachMsg := fmt.Sprintf("📎 Văn bản OCR đầy đủ (%d ký tự) — tải về để xem:", len([]rune(string(out.FileBytes))))
-					fileMsg, _ := b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, attachMsg)
-					if fileMsg != nil && fileMsg.ID != "" {
-						_ = b.sessionStore.CreateSession(fileMsg.ID, userID, "doc", "Raw OCR", reconstructed)
-					}
-				}
-
 				// Save session for optional follow-up Q&A on the OCR result
 				if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
 					_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", "Raw OCR", reconstructed)
@@ -336,27 +327,15 @@ func (b *OmniScanBot) setupHandlers() {
 			if err != nil {
 				log.Printf("⚠️ LLM error: %v. Fallback to raw OCR embed.", err)
 				out := BuildOCRResult(result, reconstructed, currentCount, scanLimit)
-				b.sendReplyContent(channel, msg, out.Content)
-				if len(out.FileBytes) > 0 {
-					fileMsg, _ := b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, "📎 Văn bản OCR đầy đủ:")
-					if fileMsg != nil && fileMsg.ID != "" {
-						_ = b.sessionStore.CreateSession(fileMsg.ID, userID, "doc", "Raw OCR", reconstructed)
-					}
+				sentFallback, _ := b.sendReplyContent(channel, msg, out.Content)
+				if sentFallback != nil && sentFallback.ID != "" {
+					_ = b.sessionStore.CreateSession(sentFallback.ID, userID, "doc", "Raw OCR", reconstructed)
 				}
 				return
 			}
 
 			out := BuildScanResult(res.DocType, res.Formatted, currentCount, scanLimit, askLimit)
-
 			sentMsg, sendErr := b.sendReplyContent(channel, msg, out.Content)
-
-			// If AI output was very long, also send it as a .md file
-			if len(out.FileBytes) > 0 {
-				fileMsg, _ := b.sendFileAttachment(channel, msg, out.FileName, out.FileBytes, "📎 Kết quả AI đầy đủ (Markdown):")
-				if fileMsg != nil && fileMsg.ID != "" {
-					_ = b.sessionStore.CreateSession(fileMsg.ID, userID, "doc", res.DocType, reconstructed)
-				}
-			}
 
 			if sendErr == nil && sentMsg != nil && sentMsg.ID != "" {
 				_ = b.sessionStore.CreateSession(sentMsg.ID, userID, "doc", res.DocType, reconstructed)

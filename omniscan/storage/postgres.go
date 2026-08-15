@@ -81,7 +81,15 @@ func (s *PostgresQuotaStore) migrate(ctx context.Context) error {
 		`ALTER TABLE user_daily_scans ADD COLUMN IF NOT EXISTS scan_count INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE user_daily_scans ADD COLUMN IF NOT EXISTS ocr_count  INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS daily_ocr_limit   INTEGER NOT NULL DEFAULT 5`,
-		`UPDATE user_daily_scans SET scan_count = count WHERE scan_count = 0 AND count > 0`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1 FROM information_schema.columns 
+				WHERE table_name = 'user_daily_scans' AND column_name = 'count'
+			) THEN
+				EXECUTE 'UPDATE user_daily_scans SET scan_count = count WHERE scan_count = 0 AND count > 0';
+			END IF;
+		END $$;`,
 	}
 	for _, q := range migrations {
 		if _, err := s.pool.Exec(ctx, q); err != nil {

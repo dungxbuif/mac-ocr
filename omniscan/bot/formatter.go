@@ -152,15 +152,10 @@ func BuildOCRResult(result *ocr.ResultPayload, reconstructed string, currentCoun
 	body := strings.TrimSpace(reconstructed)
 	safeBody := strings.ReplaceAll(body, "```", "'''")
 
-	var fileBytes []byte
-	var fileName string
 	var truncNote string
-
 	if mezon.UTF16Len(safeBody) > maxEmbedBody {
-		fileBytes = []byte(body)
-		fileName = fmt.Sprintf("ocr_%s.txt", time.Now().Format("20060102_150405"))
 		safeBody = mezon.TruncateUTF16(safeBody, maxEmbedBody)
-		truncNote = "\n\n📎 *Văn bản đầy đủ đã được gửi kèm file bên dưới.*"
+		truncNote = "\n\n*(Nội dung dài đã được cắt bớt để hiển thị tối ưu)*"
 	}
 
 	description := "```text\n" + safeBody + "\n```" + truncNote
@@ -184,9 +179,7 @@ func BuildOCRResult(result *ocr.ResultPayload, reconstructed string, currentCoun
 		Build()
 
 	return OCROutput{
-		Content:   mezon.InteractiveCard("", embed, buttons),
-		FileBytes: fileBytes,
-		FileName:  fileName,
+		Content: mezon.InteractiveCard("", embed, buttons),
 	}
 }
 
@@ -216,15 +209,11 @@ func BuildScanResult(docType, formatted string, currentCount, maxQuota, askLimit
 	title := "🏷️ " + docTypeClean
 
 	body := strings.TrimSpace(formatted)
-	var fileBytes []byte
-	var fileName string
 	var truncNote string
 
 	if mezon.UTF16Len(body) > embedDescriptionLimit {
-		fileBytes = []byte(body)
-		fileName = fmt.Sprintf("scan_%s.md", time.Now().Format("20060102_150405"))
 		body = mezon.TruncateUTF16(body, embedDescriptionLimit)
-		truncNote = "\n\n📎 *Nội dung chi tiết đã được gửi kèm file Markdown bên dưới.*"
+		truncNote = "\n\n*(Báo cáo dài đã được cắt ngắn để hiển thị tối ưu)*"
 	}
 	if body == "" {
 		body = "_(Không có nội dung được trích xuất.)_"
@@ -248,9 +237,7 @@ func BuildScanResult(docType, formatted string, currentCount, maxQuota, askLimit
 		Build()
 
 	return ScanOutput{
-		Content:   mezon.InteractiveCard("", embed, buttons),
-		FileBytes: fileBytes,
-		FileName:  fileName,
+		Content: mezon.InteractiveCard("", embed, buttons),
 	}
 }
 
