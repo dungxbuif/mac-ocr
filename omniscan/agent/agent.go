@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -98,6 +100,7 @@ NGUYÊN TẮC:
 		systemPrompt += "\n\n📝 YÊU CẦU ĐẶC BIỆT TỪ NGƯỜI DÙNG: " + strings.TrimSpace(customPrompt)
 	}
 
+	start := time.Now()
 	resp, err := a.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: a.model,
 		Messages: []openai.ChatCompletionMessage{
@@ -106,8 +109,10 @@ NGUYÊN TẮC:
 		},
 		Temperature: a.scanTemperature,
 	})
+	latency := time.Since(start)
 
 	if err != nil {
+		log.Printf("❌ [LLM-CLASSIFY] model=%s latency=%v error=%v", a.model, latency, err)
 		return nil, fmt.Errorf("LLM completion error: %w", err)
 	}
 
@@ -126,6 +131,9 @@ NGUYÊN TẮC:
 			content = strings.TrimSpace(content[idx+1:])
 		}
 	}
+
+	log.Printf("✅ [LLM-CLASSIFY] model=%s docType=%q latency=%v prompt_tok=%d comp_tok=%d total_tok=%d",
+		a.model, docType, latency, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 
 	return &ClassifyResult{
 		DocType:   docType,
@@ -170,19 +178,25 @@ Dựa TRỰC TIẾP và CHÍNH XÁC vào nội dung tài liệu OCR và ngữ c�
 		Content: fmt.Sprintf("❓ CÂU HỎI MỚI: %s", question),
 	})
 
+	start := time.Now()
 	resp, err := a.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:       a.model,
 		Messages:    messages,
 		Temperature: a.qaTemperature,
 	})
+	latency := time.Since(start)
 
 	if err != nil {
+		log.Printf("❌ [LLM-QA] model=%s history_turns=%d latency=%v error=%v", a.model, len(history), latency, err)
 		return "", fmt.Errorf("LLM completion error: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("empty response from LLM agent")
 	}
+
+	log.Printf("✅ [LLM-QA] model=%s history_turns=%d latency=%v prompt_tok=%d comp_tok=%d total_tok=%d",
+		a.model, len(history), latency, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }

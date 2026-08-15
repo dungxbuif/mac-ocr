@@ -16,55 +16,60 @@ import (
 
 // FormatHelpMessage returns the plain-text help banner.
 func FormatHelpMessage() string {
-	return `🤖 OMNISCAN — TRỢ LÝ NHẬN DIỆN TÀI LIỆU AI
-══════════════════════════════════════════
+	return `🤖 OMNISCAN — TRỢ LÝ NHẬN DIỆN & PHÂN TÍCH TÀI LIỆU AI
+═════════════════════════════════════════════════════════════
 
-OmniScan trích xuất, phân loại và trả lời câu hỏi về nội dung tài liệu ngay trong Mezon. Mọi lệnh sử dụng tiền tố * và được gõ trực tiếp vào khung chat.
+OmniScan kết hợp công nghệ OCR Apple Silicon tốc độ cao với Trí tuệ nhân tạo (LLM Reasoning) để đọc hiểu, trích xuất dữ liệu và giải đáp mọi thắc mắc về tài liệu trực tiếp trên Mezon.
 
-[1] *scan  —  Phân tích bằng AI
-    Nhận diện loại tài liệu (hóa đơn, CCCD, hợp đồng, bài viết...) và trình bày lại dưới dạng Markdown có cấu trúc.
-    Cách dùng:
-      • *scan <url ảnh/PDF>              —  tải từ URL công khai
-      • *scan "<yêu cầu riêng>" <url>    —  ví dụ: *scan "dịch sang tiếng Anh" <url>
-      • Đính kèm ảnh/PDF rồi gõ *scan       —  nạp file trực tiếp
+📌 CÁC LỆNH CHÍNH (Tiền tố *):
 
-[2] *ocr  —  Trích xuất văn bản thô
-    Bóc tách văn bản giữ nguyên bố cục hai chiều (bảng, cột), không qua AI; kết quả sát bản gốc.
-    Cách dùng:
-      • *ocr <url>                       —  tải từ URL công khai
-      • Đính kèm file rồi gõ *ocr            —  nạp file trực tiếp
+[1] *scan  —  AI Phân Tích & Bóc Tách Thông Minh
+    • Tự động nhận diện loại tài liệu (Hóa đơn, Hợp đồng, CCCD, Bảng biểu, Menu, Bài viết...).
+    • Trích xuất thông tin trọng yếu thành bảng Markdown, tóm tắt nhanh và phân tích rủi ro.
+    • Hỗ trợ Prompt tùy chỉnh theo ý muốn:
+        ▸ *scan <url ảnh/PDF>
+        ▸ *scan "Dịch toàn bộ sang tiếng Anh" <url>
+        ▸ *scan "Chỉ trích xuất mã số thuế và số tài khoản" <url>
+        ▸ Đính kèm ảnh/PDF trực tiếp rồi gõ *scan
 
-[3] Hỏi đáp tài liệu  —  Trích dẫn (Reply)
-    Trích dẫn tin nhắn kết quả của bot và đặt câu hỏi bất kỳ về nội dung đã nhận diện.
-    Giới hạn: tối đa 5 câu hỏi mỗi tài liệu.
+[2] *ocr  —  Trích Xuất Văn Bản Thô (2D Geometric Layout)
+    • Bóc tách nguyên văn 100% ký tự theo chuẩn tọa độ 2 chiều (giữ nguyên hàng, cột, bảng).
+    • Tốc độ siêu tốc (<0.5s), không tốn token AI, thích hợp copy mã nguồn, văn bản dài.
+        ▸ *ocr <url ảnh/PDF>
+        ▸ Đính kèm ảnh/PDF rồi gõ *ocr
 
-[4] *quota  —  Xem hạn ngạch
-    Kiểm tra số lượt scan còn lại trong ngày.
+[3] 💬 Hỏi Đáp Chuyên Sâu (Threaded Q&A)
+    • Nhấn [Reply / Trích dẫn] vào BẤT KỲ tin nhắn nào trong luồng hội thoại để hỏi AI.
+    • AI tự động ghi nhớ toàn bộ ngữ cảnh lịch sử các câu hỏi trước đó.
+    • Mọi thành viên trong kênh đều có thể tham gia hỏi đáp (tính lượt riêng từng người).
 
-[5] *os / *omniscan  —  Xem hướng dẫn này
+[4] *quota  —  Kiểm Tra Lượt Dùng
+    • Xem số lượt scan AI, OCR thô và hỏi đáp còn lại trong ngày (Reset lúc 00:00).
 
-══════════════════════════════════════════
-Định dạng hỗ trợ:  JPG · PNG · WEBP · TIFF · PDF
-Hạn ngạch:  lượt *scan và *ocr đếm RIÊNG theo ngày; câu hỏi đếm riêng theo tài liệu  ·  reset 00:00 hằng ngày`
+[5] *os / *omniscan  —  Mở Bảng Hướng Dẫn Này
+
+═════════════════════════════════════════════════════════════
+📁 Định dạng hỗ trợ: JPG · PNG · WEBP · TIFF · PDF (Tối đa 100MB)
+💡 Mẹo: Với hóa đơn hoặc hợp đồng, hãy dùng *scan để AI lập bảng tóm tắt và chỉ ra các điểm cần lưu ý!`
 }
 
 // BuildHelpContent returns the rich embed help card with action buttons.
 func BuildHelpContent(scanLimit, ocrLimit, askLimit int) mezon.Content {
-	embed := mezon.NewInteractiveBuilder("🤖 OMNISCAN — Trợ lý nhận diện tài liệu AI").
-		SetDescription("Trích xuất, phân loại và trả lời về nội dung tài liệu ngay trong Mezon. Mọi lệnh dùng tiền tố `*` — gõ trực tiếp vào chat.").
-		AddField("🚀 *scan — Phân tích AI", "Nhận diện loại tài liệu + định dạng Markdown cấu trúc.\n▸ `*scan <url>`\n▸ `*scan \"<prompt riêng>\" <url>`\n▸ Đính kèm ảnh/PDF → gõ `*scan`", false).
-		AddField("⚡ *ocr — Văn bản thô (2D Layout)", "Bóc tách giữ nguyên bố cục cột/bảng 2 chiều.\n▸ `*ocr <url>`\n▸ Đính kèm file → gõ `*ocr`", false).
-		AddField("💬 Hỏi đáp chuyên sâu (Quote-Reply)", "Trích dẫn (Reply) kết quả bot để hỏi thêm.\n▸ Tối đa "+itoa(askLimit)+" câu hỏi/tài liệu", false).
+	embed := mezon.NewInteractiveBuilder("🤖 OMNISCAN — Hướng dẫn sử dụng AI Document Assistant").
+		SetDescription("Trích xuất, phân loại và hỏi đáp chuyên sâu về tài liệu trực tiếp trên Mezon. Mọi lệnh bắt đầu bằng tiền tố `*`.").
+		AddField("🚀 *scan — Phân tích AI & Bóc tách", "Đọc hiểu tài liệu, lập bảng dữ liệu, tóm tắt & phân tích rủi ro.\n▸ `*scan <url>`\n▸ `*scan \"<prompt yêu cầu>\" <url>` *(ví dụ: *scan \"dịch sang tiếng Anh\" <url>)*\n▸ Đính kèm file ảnh/PDF → gõ `*scan`", false).
+		AddField("⚡ *ocr — Bóc tách thô (2D Layout)", "Trích xuất 100% ký tự nguyên bản giữ nguyên cột bảng hai chiều.\n▸ `*ocr <url>` hoặc đính kèm ảnh/PDF → gõ `*ocr`", false).
+		AddField("💬 Hỏi đáp ngữ cảnh (Quote-Reply)", "Nhấn **Reply** vào bất kỳ tin nhắn nào trong luồng để hỏi tiếp AI.\n▸ Ghi nhớ toàn bộ lịch sử trò chuyện • Đa người dùng tham gia", false).
 		AddField("📊 *quota", "Xem lượt còn lại hôm nay", true).
 		AddField("❓ *os / *omniscan", "Xem bảng hướng dẫn này", true).
 		Build()
 	embed["author"] = map[string]any{
-		"name": "🤖 OmniScan AI Assistant • Mezon Platform",
+		"name": "🤖 OmniScan AI Assistant • Powered by Apple Silicon MacOCR",
 	}
 	embed["footer"] = map[string]any{
 		"text": fmt.Sprintf("Hạn ngạch: %d scan + %d OCR/ngày • %d câu Q&A/tài liệu • Reset 00:00", scanLimit, ocrLimit, askLimit),
 	}
-	embed["color"] = "#8B5CF6" // Violet
+	embed["color"] = "#8B5CF6" // Violet Purple
 
 	buttons := mezon.NewButtonBuilder().
 		AddButton("omniscan_quota", "📊 Xem Quota", mezon.ButtonPrimary).

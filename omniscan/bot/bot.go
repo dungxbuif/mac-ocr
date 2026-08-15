@@ -626,15 +626,37 @@ func (b *OmniScanBot) downloadAttachmentBytes(ctx context.Context, url string) (
 // path. For Mezon attachments the url points at cdn.komu.vn behind Cloudflare;
 // the proxy host sometimes cannot fetch it (404 / geo-block), so the bot
 // downloads the attachment itself and submits the raw bytes as base64,
-// bypassing the proxy's URL fetcher entirely. The proxy sniffs the MIME type
-// from the bytes, so no mimeType field is sent.
+// bypassing the proxy's URL fetcher entirely.
 func (b *OmniScanBot) submitOCRFull(ctx context.Context, urlToScan string, asAttachment bool) (*ocrlib.ResultPayload, error) {
+	start := time.Now()
 	if !asAttachment {
-		return b.ocrClient.SubmitAndPollFull(ctx, urlToScan)
+		res, err := b.ocrClient.SubmitAndPollFull(ctx, urlToScan)
+		latency := time.Since(start)
+		if err != nil {
+			log.Printf("❌ [OCR-PIPELINE] mode=url url=%s latency=%v error=%v", urlToScan, latency, err)
+			return nil, err
+		}
+		log.Printf("✅ [OCR-PIPELINE] mode=url latency=%v pages=%d text_len=%d", latency, res.PageCount, len(res.Text))
+		return res, nil
 	}
+
+	dlStart := time.Now()
 	data, err := b.downloadAttachmentBytes(ctx, urlToScan)
+	dlLatency := time.Since(dlStart)
 	if err != nil {
+		log.Printf("❌ [OCR-DOWNLOAD] url=%s latency=%v error=%v", urlToScan, dlLatency, err)
 		return nil, fmt.Errorf("download attachment: %w", err)
 	}
-	return b.ocrClient.SubmitAndPollBase64Full(ctx, data)
+	log.Printf("✅ [OCR-DOWNLOAD] bytes=%d latency=%v", len(data), dlLatency)
+
+	ocrStart := time.Now()
+	res, err := b.ocrClient.SubmitAndPollBase64Full(ctx, data)
+	ocrLatency := time.Since(ocrStart)
+	if err != nil {
+		log.Printf("❌ [OCR-PIPELINE] mode=base64 latency=%v error=%v", ocrLatency, err)
+		return nil, err
+	}
+	log.Printf("✅ [OCR-PIPELINE] mode=base64 total_latency=%v (dl=%v ocr=%v) pages=%d text_len=%d",
+		time.Since(start), dlLatency, ocrLatency, res.PageCount, len(res.Text))
+	return res, nil
 }
