@@ -160,8 +160,9 @@ WHERE channel = 'webhook' AND delivery_status IN ('pending','delivering');
 CREATE INDEX IF NOT EXISTS idx_notification_sse_user
 ON notification_events(user_id, id)
 WHERE channel = 'sse';
+DROP INDEX IF EXISTS idx_notification_document_terminal;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_document_terminal
-ON notification_events(document_id, event_type);
+ON notification_events(document_id, event_type, channel);
 CREATE OR REPLACE FUNCTION create_default_account_config()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN

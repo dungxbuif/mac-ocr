@@ -19,17 +19,24 @@ type NativeCapacity struct {
 }
 
 type NativeEvent struct {
-	EventID    string         `json:"eventId"`
-	Type       string         `json:"type"`
-	NodeID     string         `json:"nodeId"`
-	BootID     string         `json:"bootId"`
-	Sequence   uint64         `json:"sequence"`
-	AttemptID  string         `json:"attemptId"`
-	DocumentID string         `json:"documentId"`
-	Result     *OCRResult     `json:"result,omitempty"`
-	Error      string         `json:"error,omitempty"`
-	Capacity   NativeCapacity `json:"capacity"`
-	OccurredAt time.Time      `json:"occurredAt"`
+	EventID    string            `json:"eventId"`
+	Type       string            `json:"type"`
+	NodeID     string            `json:"nodeId"`
+	BootID     string            `json:"bootId"`
+	Sequence   uint64            `json:"sequence"`
+	AttemptID  string            `json:"attemptId"`
+	DocumentID string            `json:"documentId"`
+	Result     *OCRResult        `json:"result,omitempty"`
+	ScanResult *NativeScanResult `json:"scanResult,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	Capacity   NativeCapacity    `json:"capacity"`
+	OccurredAt time.Time         `json:"occurredAt"`
+}
+
+type NativeScanResult struct {
+	MediaType string `json:"mediaType"`
+	SizeBytes int64  `json:"sizeBytes"`
+	SHA256    string `json:"sha256"`
 }
 
 type NativeOCRRequest struct {
@@ -39,6 +46,19 @@ type NativeOCRRequest struct {
 	Input      NativeInputRef    `json:"input"`
 	Options    *OCROptions       `json:"options,omitempty"`
 	Callback   NativeCallbackRef `json:"callback"`
+}
+
+type NativeScanRequest struct {
+	DocumentID string              `json:"documentId"`
+	AttemptID  string              `json:"attemptId"`
+	Input      NativeInputRef      `json:"input"`
+	Output     NativeScanOutputRef `json:"output"`
+	Callback   NativeCallbackRef   `json:"callback"`
+}
+
+type NativeScanOutputRef struct {
+	URL       string `json:"url"`
+	MediaType string `json:"mediaType"`
 }
 
 type NativeInputRef struct {

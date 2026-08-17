@@ -49,6 +49,8 @@ Poll the document URL until it reaches a terminal state, choose webhook/SSE noti
 | `GET` | `/readyz` | Dependency readiness check |
 | `GET` | `/v1/ocr/capabilities` | Recognition options and public limits |
 | `POST` | `/v1/uploads/presign` | Create a size-bound upload URL |
+| `POST` | `/v1/scans` | Submit an image-only scan (perspective-corrected JPEG output, no OCR) |
+| `GET` | `/v1/scans/{scanId}` | Read scan status and download URL |
 | `POST` | `/v1/documents` | Submit one document |
 | `GET` | `/v1/documents/{id}` | Read document status and completed result |
 | `POST` | `/v1/batches` | Submit a batch |

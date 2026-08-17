@@ -145,7 +145,37 @@ curl -H "Authorization: Bearer $OCR_API_KEY" \
 
 The local worker downloads the stored input and calls the proxy back asynchronously. The result text is deterministic development metadata, not a production accuracy result.
 
-## 9. Negative validation cases
+## 9. Submit and poll a document scan
+
+A scan returns a perspective-corrected, contrast-enhanced JPEG instead of text. Only image inputs are accepted.
+
+```bash
+curl -X POST "$OCR_API_URL/v1/scans" \
+  -H "Authorization: Bearer $OCR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"url":"https://files.example.com/contract.jpg"}}'
+```
+
+Save the returned `scanId` (`scan_<hex>`) and poll:
+
+```bash
+curl -H "Authorization: Bearer $OCR_API_KEY" \
+  "$OCR_API_URL/v1/scans/$SCAN_ID"
+```
+
+When `status` is `completed`, download the output within `downloadUrlExpiresAt`:
+
+```bash
+curl -o scan-clean.jpg "$SCAN_DOWNLOAD_URL"
+```
+
+Negative cases to confirm:
+
+- Submit a PDF to `/v1/scans` returns `415 UNSUPPORTED_MEDIA_TYPE` (`scan accepts image inputs only`).
+- Sending `options.processingMode` on a scan submission returns `400 INVALID_INPUT` (reserved internal field).
+- A scan consumes one `doc` quota unit, same as `/v1/documents`; a failed scan refunds it.
+
+## 10. Negative validation cases
 
 ### Both sources
 
@@ -213,7 +243,7 @@ Expected: `400 INVALID_INPUT`.
 
 Expected: `400 INVALID_INPUT` because every request body must contain exactly one JSON value.
 
-## 10. Verify notification and result TTL paths
+## 11. Verify notification and result TTL paths
 
 Submit one document with `"notification":{"type":"sse"}`, then connect to `GET /v1/events` with the same Bearer key. A terminal event should arrive with an `id`; reconnecting with `Last-Event-ID` resumes after that event. For webhooks, verify `X-OCR-Signature` against `timestamp.eventId.rawBody` using the configured secret.
 
@@ -221,7 +251,7 @@ On completion, verify `GET /v1/documents/{id}` returns the structured Redis-back
 
 For MCP, initialize at `POST /mcp`, call `tools/list`, submit with `submit_ocr_document`, and keep authenticated `GET /mcp` open. Verify task-status and resource-updated messages use the returned document ID.
 
-## 11. Automated checks
+## 12. Automated checks
 
 ```bash
 cd proxy

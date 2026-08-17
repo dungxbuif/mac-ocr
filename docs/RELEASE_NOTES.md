@@ -1,6 +1,23 @@
-# Release Notes — v1.0.2
+# Release Notes — v1.0.3
 
-**Release Date:** August 15, 2026
+**Release Date:** August 16, 2026
+
+---
+
+## 🚀 Version 1.0.3 — Document Scanning (Image Enhancement)
+
+### ✨ Document Scanning end-to-end
+
+- **New `POST /v1/scans` endpoint** for image-only submissions that return a perspective-corrected, contrast-enhanced JPEG instead of recognized text. Scans deliberately skip OCR; there are no recognition options on the scan route.
+- **New `GET /v1/scans/{scanId}` endpoint** returns the same `queued` / `processing` / `completed` / `failed` lifecycle as `/v1/documents/{id}` plus a short-lived 15-minute presigned `downloadUrl` and `downloadUrlExpiresAt`.
+- **Shared quota accounting**: a scan consumes one `doc` quota unit from the same counter as OCR, and a scan failure refunds it the same way an OCR failure does. This keeps daily limits honest across both pipelines.
+- **Native pipeline extension**: the worker contracts now carry a `processingMode` discriminator. The scheduler routes scan documents to the worker's `/scan` endpoint instead of `/ocr`; the native app runs `VNDetectRectanglesRequest` perspective correction and CIImage contrast enhancement, encodes a JPEG, and uploads it through a signed PUT to `/webhooks/native/events/scans/{scanId}/{attemptId}/output`, then POSTs a `scan.completed` callback carrying the result checksum to the same webhook root as OCR. The proxy stores the object on PUT and atomically finalizes the document (status, result key, TTL, notification outbox) on the callback.
+- **Scan output objects** live under `scan-results/{userId}/...` and are swept by the existing retention worker, which already clears `ResultKey` on expired document rows.
+
+### 🔒 Security
+
+- Scan output PUTs are HMAC-SHA256 verified over `<scanId>.<attemptId>` using the webhook secret and capped at the same 100 MiB resource ceiling as OCR inputs.
+- The internal `processingMode` field is rejected on public submissions; only scan IDs matching `scan_<hex>` are enumerable under the authenticated API key.
 
 ---
 

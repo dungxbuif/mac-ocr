@@ -191,6 +191,19 @@ curl --fail --silent --show-error \
 
 See [API reference](../api/API_REFERENCE.md), [MCP integration](../api/MCP_INTEGRATION.md), or open the live <a href="/api/v1/docs" target="_blank" rel="noopener noreferrer">Swagger UI</a> in a separate tab.
 
+## When you want an enhanced image instead of text
+
+If the input is a photo of a document and you need a perspective-corrected, contrast-enhanced JPEG rather than recognized text, use the scan route. It accepts image-only inputs (JPEG, PNG, TIFF, WebP) and never runs OCR.
+
+```bash
+curl -X POST "$OCR_API_URL/v1/scans" \
+  -H "Authorization: Bearer $OCR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"url":"https://files.example.com/contract.jpg"}}'
+```
+
+Poll `GET /v1/scans/{scanId}` the same way you poll a document. A completed scan returns a short-lived `downloadUrl` (15-minute presigned GET) and `downloadUrlExpiresAt`; fetch the JPEG inside that window. A scan consumes one unit of the same daily document quota as `/v1/documents`, and a failed scan refunds it. Submitting a PDF or any non-image input returns `415 UNSUPPORTED_MEDIA_TYPE`; sending `options` (recognition fields) returns `400 INVALID_INPUT` because scans accept no recognition options.
+
 ## Retention behavior
 
 OCR results are temporary. A completed response tells you when its result expires through `resultExpiresAt`. Store any business data you need before that time. The platform later removes both the cached result and its temporary document metadata; users cannot list or delete documents through the public API.

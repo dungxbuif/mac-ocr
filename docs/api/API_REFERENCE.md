@@ -188,6 +188,51 @@ There is no public list, delete, or cancel operation. Clients must retain the re
 
 For the complete result payload, Apple Vision field provenance, confidence semantics, bounding-box coordinates, PDF page joining, and client examples, see [OCR response model](OCR_RESPONSE.md).
 
+## Document scans (image enhancement)
+
+### `POST /v1/scans`
+
+Scan is an asynchronous **document scan** that returns a perspective-corrected, contrast-enhanced JPEG instead of text. It deliberately does **not** run OCR or expose recognition options — the only output is a clean image, suitable for re-submitting to `POST /v1/documents` when text is actually needed.
+
+Request body is the same input envelope as `/v1/documents`, plus an optional `notification` channel. `options` is **not accepted** for scans; the `processingMode` field in `options` is reserved for internal use and is rejected on public submissions.
+
+```json
+{"input":{"url":"https://files.example.com/contract.jpg"}}
+```
+
+Only `image/*` sources are accepted. PDF, TIFF multipage, or any non-image input returns `415 UNSUPPORTED_MEDIA_TYPE`.
+
+Response:
+
+```json
+{
+  "scanId": "scan_18f673199c0",
+  "status": "queued",
+  "createdAt": "2026-08-15T03:39:00Z"
+}
+```
+
+The `Location` and `Retry-After` response headers point at `/v1/scans/{scanId}` and indicate polling cadence. Scan IDs follow the `scan_<hex>` shape and are enumerable only under the same authenticated API key that created them.
+
+### `GET /v1/scans/{scanId}`
+
+Returns the same `queued` / `processing` / `completed` / `failed` lifecycle as `/v1/documents/{documentId}`. A completed scan includes a short-lived `downloadUrl` (15-minute presigned GET) plus `downloadUrlExpiresAt`; the underlying object lives under `scan-results/{userId}/...` and follows the same retention rules as OCR result objects. Pending scans include `Retry-After`.
+
+```json
+{
+  "scanId": "scan_18f673199c0",
+  "status": "completed",
+  "createdAt": "2026-08-15T03:39:00Z",
+  "updatedAt": "2026-08-15T03:39:14Z",
+  "downloadUrl": "https://storage.example.com/...",
+  "downloadUrlExpiresAt": "2026-08-15T03:54:14Z"
+}
+```
+
+A failed scan returns `errorDetail`. Reading someone else's scan ID returns `404`; a completed scan whose result object expired while metadata is retained returns `410 RESULT_EXPIRED`. There is no public list, delete, or cancel.
+
+Scan consumes one `doc` quota unit — the same counter as OCR — so an account's daily document quota is shared across `POST /v1/documents` and `POST /v1/scans`. Scan failures refund the quota, matching the OCR path.
+
 ## Batch documents
 
 ### `POST /v1/batches`
@@ -304,6 +349,8 @@ Important codes include `INVALID_SOURCE`, `INVALID_BASE64`, `BASE64_TOO_LARGE`, 
 | `GET` | `/healthz` | Process liveness |
 | `GET` | `/readyz` | PostgreSQL, Redis, and object-storage readiness |
 | `GET` | `/v1/ocr/capabilities` | Public options, languages, and limits |
+| `POST` | `/v1/scans` | Submit an image-only document scan (perspective-corrected JPEG output, no OCR) |
+| `GET` | `/v1/scans/{scanId}` | Poll scan status and download URL |
 | `POST` | `/v1/uploads/presign` | Create authenticated presigned upload URLs for large files |
 | `GET` | `/api/v1/docs` | Swagger UI |
 | `GET` | `/api/v1/openapi.json` | Runtime-generated OpenAPI contract, including `x-mcp-tools` |

@@ -224,6 +224,99 @@ public actor NativeWorkerState {
         await deliverCallback(urlStr: request.callback.url, event: event)
     }
 
+    public func processScan(request: NativeScanRequest) async {
+        var processError: Error?
+        var scanResult: NativeScanResult?
+        logger(.info, "Scan started document=\(request.documentId) attempt=\(request.attemptId)")
+
+        do {
+            guard let inputURL = URL(string: request.input.url) else {
+                throw NSError(domain: "NativeWorker", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid input URL"])
+            }
+            let (stream, response) = try await session.bytes(from: inputURL)
+            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                throw NSError(domain: "NativeWorker", code: status, userInfo: [NSLocalizedDescriptionKey: "Failed to download input object (HTTP \(status))"])
+            }
+            if httpResponse.expectedContentLength > Int64(maxInputBytes) {
+                throw NSError(domain: "NativeWorker", code: 413, userInfo: [NSLocalizedDescriptionKey: "Input exceeds 100 MiB"])
+            }
+            var input = Data()
+            input.reserveCapacity(min(maxInputBytes, max(0, Int(httpResponse.expectedContentLength))))
+            for try await byte in stream {
+                if input.count >= maxInputBytes {
+                    throw NSError(domain: "NativeWorker", code: 413, userInfo: [NSLocalizedDescriptionKey: "Input exceeds 100 MiB"])
+                }
+                input.append(byte)
+            }
+            guard !input.isEmpty else {
+                throw NSError(domain: "NativeWorker", code: 400, userInfo: [NSLocalizedDescriptionKey: "Downloaded input is empty"])
+            }
+            if let expectedHash = request.input.sha256, !expectedHash.isEmpty {
+                let actualHash = SHA256.hash(data: input).map { String(format: "%02x", $0) }.joined()
+                guard constantTimeEqual(actualHash.lowercased(), expectedHash.lowercased()) else {
+                    throw NSError(domain: "NativeWorker", code: 400, userInfo: [NSLocalizedDescriptionKey: "Input SHA-256 mismatch"])
+                }
+            }
+
+            let output = try DocumentScanEngine.scan(data: input)
+            guard output.count <= maxInputBytes else {
+                throw NSError(domain: "NativeWorker", code: 413, userInfo: [NSLocalizedDescriptionKey: "Scanned output exceeds 100 MiB"])
+            }
+            try await uploadScanOutput(urlStr: request.output.url, data: output, mediaType: request.output.mediaType, documentID: request.documentId, attemptID: request.attemptId)
+            scanResult = NativeScanResult(
+                mediaType: request.output.mediaType,
+                sizeBytes: output.count,
+                sha256: SHA256.hash(data: output).map { String(format: "%02x", $0) }.joined()
+            )
+            logger(.info, "Scan completed document=\(request.documentId) bytes=\(output.count)")
+        } catch {
+            processError = error
+            logger(.error, "Scan failed document=\(request.documentId) attempt=\(request.attemptId): \(error.localizedDescription)")
+        }
+
+        let (seq, cap) = releaseSlot(attemptID: request.attemptId)
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let eventID = "evt_native_\(UInt64(Date().timeIntervalSince1970 * 1000))_\(seq)"
+        let event = NativeEvent(
+            eventId: eventID,
+            type: processError != nil ? "scan.failed" : "scan.completed",
+            nodeId: nodeId,
+            bootId: bootId,
+            sequence: seq,
+            attemptId: request.attemptId,
+            documentId: request.documentId,
+            scanResult: scanResult,
+            error: processError?.localizedDescription,
+            capacity: cap,
+            occurredAt: isoFormatter.string(from: Date())
+        )
+        await deliverCallback(urlStr: request.callback.url, event: event)
+    }
+
+    private func uploadScanOutput(urlStr: String, data: Data, mediaType: String, documentID: String, attemptID: String) async throws {
+        guard let url = URL(string: urlStr) else {
+            throw NSError(domain: "NativeWorker", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid scan upload URL"])
+        }
+        let timestamp = "\(Int64(Date().timeIntervalSince1970))"
+        let eventID = "out_\(documentID)_\(attemptID)"
+        let signature = Signer.sign(secret: authSecret, nodeId: nodeId, timestamp: timestamp, eventId: eventID, body: data)
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue(mediaType, forHTTPHeaderField: "Content-Type")
+        req.setValue(nodeId, forHTTPHeaderField: "X-Native-Node-Id")
+        req.setValue(timestamp, forHTTPHeaderField: "X-Native-Timestamp")
+        req.setValue(eventID, forHTTPHeaderField: "X-Native-Event-Id")
+        req.setValue(signature, forHTTPHeaderField: "X-Native-Signature")
+        req.httpBody = data
+        let (_, response) = try await session.data(for: req)
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NativeWorker", code: status, userInfo: [NSLocalizedDescriptionKey: "Failed to upload scanned output (HTTP \(status))"])
+        }
+    }
+
     private func deliverCallback(urlStr: String, event: NativeEvent) async {
         guard let url = URL(string: urlStr) else {
             logger(.error, "Callback URL is invalid event=\(event.eventId)")
@@ -495,6 +588,43 @@ public final class NativeHTTPServer {
                 return
             }
 
+            if method == "POST" && path == "/scan" {
+                guard authorized(headers: headers, secret: state.authSecret) else {
+                    logger(.warning, "Rejected unauthorized scan request")
+                    sendResponse(connection: connection, status: 401, body: "{\"error\":\"invalid bearer token\"}")
+                    return
+                }
+                guard isJSON(headers: headers) else {
+                    sendResponse(connection: connection, status: 415, body: "{\"error\":\"content type must be application/json\"}")
+                    return
+                }
+                guard validateScanJSON(body), let scanReq = try? JSONDecoder().decode(NativeScanRequest.self, from: body),
+                      validScanRequest(scanReq) else {
+                    sendResponse(connection: connection, status: 400, body: "{\"error\":\"invalid scan request JSON\"}")
+                    return
+                }
+                let (slotAccepted, cap) = await state.tryAcquireSlot(attemptID: scanReq.attemptId, mediaType: scanReq.input.mediaType)
+                if !slotAccepted {
+                    let payload = CapacityUnavailableResponse(error: "capacity unavailable", capacity: cap)
+                    let json = (try? JSONEncoder().encode(payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                    sendResponse(connection: connection, status: 503, headers: ["Retry-After": "1"], body: json)
+                    return
+                }
+                let response = AcceptedResponse(attemptId: scanReq.attemptId)
+                let acceptedJSON = (try? JSONEncoder().encode(response)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                sendResponse(connection: connection, status: 202, body: acceptedJSON) { [self] sendError in
+                    if let sendError {
+                        logger(.error, "Scan acknowledgement failed document=\(scanReq.documentId): \(sendError.localizedDescription)")
+                        Task { _ = await state.releaseSlot(attemptID: scanReq.attemptId) }
+                        return
+                    }
+                    Task.detached { [self] in
+                        await self.state.processScan(request: scanReq)
+                    }
+                }
+                return
+            }
+
             sendResponse(connection: connection, status: 404, body: "{\"error\":\"not found\"}")
         }
     }
@@ -576,6 +706,15 @@ private func validateOCRJSON(_ body: Data) -> Bool {
     return true
 }
 
+private func validateScanJSON(_ body: Data) -> Bool {
+    guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+          Set(object.keys).isSubset(of: ["documentId", "attemptId", "input", "output", "callback"]),
+          let input = object["input"] as? [String: Any], Set(input.keys).isSubset(of: ["url", "mediaType", "sha256"]),
+          let output = object["output"] as? [String: Any], Set(output.keys).isSubset(of: ["url", "mediaType"]),
+          let callback = object["callback"] as? [String: Any], Set(callback.keys).isSubset(of: ["url"]) else { return false }
+    return true
+}
+
 private func validOCRRequest(_ request: NativeOCRRequest) -> Bool {
     let identifierCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
     func validIdentifier(_ value: String) -> Bool {
@@ -599,5 +738,23 @@ private func validOCRRequest(_ request: NativeOCRRequest) -> Bool {
         if let words = options.customWords, words.count > 500 || words.contains(where: { $0.isEmpty || $0.utf8.count > 128 }) { return false }
         if let height = options.minimumTextHeight, !height.isFinite || height < 0 || height > 1 { return false }
     }
+    return true
+}
+
+private func validScanRequest(_ request: NativeScanRequest) -> Bool {
+    let identifierCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+    func validIdentifier(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 128 && value.unicodeScalars.allSatisfy { identifierCharacters.contains($0) }
+    }
+    func validHTTPURL(_ raw: String) -> Bool {
+        guard raw.utf8.count <= 2048, let url = URL(string: raw), let scheme = url.scheme?.lowercased(), url.host != nil else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+    guard validIdentifier(request.documentId), validIdentifier(request.attemptId),
+          validHTTPURL(request.input.url), validHTTPURL(request.output.url), validHTTPURL(request.callback.url) else { return false }
+    if let hash = request.input.sha256,
+       (hash.utf8.count != 64 || !hash.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0) })) { return false }
+    guard ["image/jpeg", "image/png", "image/tiff", "image/webp"].contains(request.input.mediaType?.lowercased() ?? ""),
+          request.output.mediaType.lowercased() == "image/jpeg" else { return false }
     return true
 }

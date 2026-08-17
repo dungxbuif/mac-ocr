@@ -88,6 +88,63 @@ func (s *Service) SubmitSingle(
 	return created, nil
 }
 
+// SubmitScan creates a document-processing job whose only output is an
+// enhanced image. It deliberately does not run OCR or expose OCR options.
+func (s *Service) SubmitScan(
+	ctx context.Context,
+	userID int64,
+	input InputSource,
+	notification *domain.NotificationConfig,
+) (*domain.Document, error) {
+	doc, err := s.prepareQueuedDocument(ctx, userID, input, nil, notification)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(doc.InputContentType, "image/") {
+		return nil, fmt.Errorf("%w: scan accepts image inputs only", domain.ErrUnsupportedMediaType)
+	}
+	doc.ID = generateID("scan")
+	doc.Options.ProcessingMode = "scan"
+	created, err := s.docs.CreateWithQuota(ctx, &doc)
+	if err != nil {
+		if !isReservedUploadKey(doc.UserID, doc.InputKey) {
+			_ = s.objects.Delete(ctx, doc.InputKey)
+		}
+		return nil, err
+	}
+	s.auth.InvalidateAccountConfig(ctx, userID)
+	return created, nil
+}
+
+func (s *Service) GetScanStatus(ctx context.Context, userID int64, scanID string) (*domain.Document, error) {
+	doc, err := s.GetDocumentStatus(ctx, userID, scanID)
+	if err != nil {
+		return nil, err
+	}
+	if doc.Options == nil || doc.Options.ProcessingMode != "scan" {
+		return nil, domain.ErrNotFound
+	}
+	return doc, nil
+}
+
+func (s *Service) ScanDownloadURL(ctx context.Context, userID int64, scanID string) (*domain.Document, string, error) {
+	doc, err := s.GetScanStatus(ctx, userID, scanID)
+	if err != nil {
+		return nil, "", err
+	}
+	if doc.Status != domain.StatusCompleted || doc.ResultKey == "" {
+		return doc, "", nil
+	}
+	if doc.ResultExpiresAt != nil && !time.Now().Before(*doc.ResultExpiresAt) {
+		return nil, "", domain.ErrResultExpired
+	}
+	url, err := s.objects.PresignGetURL(ctx, doc.ResultKey, 15*time.Minute)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: scan output is unavailable", domain.ErrStorageUnavailable)
+	}
+	return doc, url, nil
+}
+
 func (s *Service) SubmitBatch(
 	ctx context.Context,
 	userID int64,

@@ -61,6 +61,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /ocr", state.handleOCR)
+	mux.HandleFunc("POST /scan", state.handleScan)
 	mux.HandleFunc("GET /health", state.handleHealth)
 	mux.HandleFunc("GET /capacity", state.handleCapacity)
 	mux.HandleFunc("PUT /runtime/config", state.handleConfig)
@@ -89,6 +90,122 @@ func main() {
 	case <-jobsDone:
 	case <-shutdownCtx.Done():
 		logger.Warn("local OCR jobs did not finish before shutdown deadline")
+	}
+}
+
+func (s *serverState) handleScan(w http.ResponseWriter, r *http.Request) {
+	if s.authSecret != "" && !hmac.Equal([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.authSecret)) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid native bearer token"})
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]), "application/json") {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "content type must be application/json"})
+		return
+	}
+	var req domain.NativeScanRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request json: " + err.Error()})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request body must contain exactly one JSON object"})
+		return
+	}
+	if req.DocumentID == "" || req.AttemptID == "" || req.Input.URL == "" || req.Output.URL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "documentId, attemptId, input.url and output.url are required"})
+		return
+	}
+
+	s.mu.Lock()
+	if s.operatorLimit == 0 || s.active >= s.operatorLimit {
+		capacity := s.capacityLocked()
+		s.mu.Unlock()
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "capacity unavailable", "capacity": capacity})
+		return
+	}
+	s.active++
+	s.jobs.Add(1)
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusAccepted, map[string]string{"attemptId": req.AttemptID, "status": "accepted"})
+	go s.processScan(req)
+}
+
+func (s *serverState) processScan(req domain.NativeScanRequest) {
+	defer s.jobs.Done()
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
+	// Simulate a perspective-corrected JPEG: synthesize a minimal valid JPEG.
+	jpegBytes := synthesizeJPEG()
+	s.mu.Lock()
+	s.active--
+	sequence := atomic.AddUint64(&s.sequence, 1)
+	capacity := s.capacityLocked()
+	s.mu.Unlock()
+	if err := s.uploadScanOutput(req, jpegBytes); err != nil {
+		s.logger.Error("scan output upload failed", "scanId", req.DocumentID, "error", err)
+		return
+	}
+	sum := sha256.Sum256(jpegBytes)
+	event := domain.NativeEvent{
+		EventID: fmt.Sprintf("evt_local_%x", time.Now().UnixNano()), NodeID: s.nodeID,
+		BootID: s.bootID, Sequence: sequence, AttemptID: req.AttemptID,
+		DocumentID: req.DocumentID, Capacity: capacity, OccurredAt: time.Now().UTC(),
+		Type:       "scan.completed",
+		ScanResult: &domain.NativeScanResult{MediaType: "image/jpeg", SizeBytes: int64(len(jpegBytes)), SHA256: hex.EncodeToString(sum[:])},
+	}
+	if err := s.deliverCallback(req.Callback.URL, event); err != nil {
+		s.logger.Error("scan callback delivery failed", "scanId", req.DocumentID, "error", err)
+		return
+	}
+	s.logger.Info("scan completed", "scanId", req.DocumentID, "attemptId", req.AttemptID, "bytes", len(jpegBytes))
+}
+
+func (s *serverState) uploadScanOutput(req domain.NativeScanRequest, body []byte) error {
+	scanID, attemptID := req.DocumentID, req.AttemptID
+	nodeID := s.nodeID
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	eventID := "out_" + scanID + "_" + attemptID
+	sig := sign(s.authSecret, nodeID, timestamp, eventID, body)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPut, req.Output.URL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "image/jpeg")
+	httpReq.Header.Set("X-Native-Node-Id", nodeID)
+	httpReq.Header.Set("X-Native-Timestamp", timestamp)
+	httpReq.Header.Set("X-Native-Event-Id", eventID)
+	httpReq.Header.Set("X-Native-Signature", sig)
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("scan output PUT returned HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func synthesizeJPEG() []byte {
+	// Minimal valid baseline JPEG (1x1, grayscale) — a stand-in for the
+	// real perspective-corrected output the native Vision pipeline produces.
+	return []byte{
+		0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+		0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05,
+		0x08, 0x07, 0x07, 0x07, 0x09, 0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C,
+		0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4,
+		0x00, 0x1F, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A,
+		0x0B, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0x00, 0xFB, 0x05, 0xFF,
+		0xD9,
 	}
 }
 

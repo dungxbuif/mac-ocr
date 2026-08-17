@@ -112,22 +112,35 @@ func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 		return
 	}
 
-	req := &domain.NativeOCRRequest{
-		DocumentID: doc.ID,
-		PageID:     "page_1",
-		AttemptID:  attemptID,
-		Input: domain.NativeInputRef{
-			URL:       presignedURL,
-			MediaType: doc.InputContentType,
-			SHA256:    doc.InputSHA256,
-		},
-		Options: doc.Options,
-		Callback: domain.NativeCallbackRef{
-			URL: s.callbackURL,
-		},
+	if doc.Options != nil && doc.Options.ProcessingMode == "scan" {
+		scanReq := &domain.NativeScanRequest{
+			DocumentID: doc.ID,
+			AttemptID:  attemptID,
+			Input:      domain.NativeInputRef{URL: presignedURL, MediaType: doc.InputContentType, SHA256: doc.InputSHA256},
+			Output: domain.NativeScanOutputRef{
+				URL:       fmt.Sprintf("%s/scans/%s/%s/output", s.callbackURL, doc.ID, attemptID),
+				MediaType: "image/jpeg",
+			},
+			Callback: domain.NativeCallbackRef{URL: s.callbackURL},
+		}
+		err = s.native.DispatchScan(ctx, scanReq)
+	} else {
+		req := &domain.NativeOCRRequest{
+			DocumentID: doc.ID,
+			PageID:     "page_1",
+			AttemptID:  attemptID,
+			Input: domain.NativeInputRef{
+				URL:       presignedURL,
+				MediaType: doc.InputContentType,
+				SHA256:    doc.InputSHA256,
+			},
+			Options: doc.Options,
+			Callback: domain.NativeCallbackRef{
+				URL: s.callbackURL,
+			},
+		}
+		err = s.native.DispatchOCR(ctx, req)
 	}
-
-	err = s.native.DispatchOCR(ctx, req)
 	if err != nil {
 		if err == native.ErrNativeBusy {
 			s.logger.Warn("native worker busy, returning document to queue", "docID", doc.ID)
@@ -180,6 +193,11 @@ func (s *Scheduler) failDocument(ctx context.Context, doc *domain.Document, deta
 		return
 	}
 	s.auth.InvalidateAccountConfig(ctx, doc.UserID)
+	if s.notifier != nil {
+		if err := s.notifier.PublishDocument(ctx, &terminalDoc); err != nil {
+			s.logger.Error("publish terminal SSE event failed", "docID", doc.ID, "error", err)
+		}
+	}
 }
 
 func (s *Scheduler) failExhaustedAttempts(ctx context.Context) {

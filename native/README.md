@@ -7,6 +7,7 @@ Native macOS OCR Worker service powered by Apple Vision Framework (`VNRecognizeT
 - macOS 13.0 (Ventura) or macOS 14.0+ (Sonoma / Sequoia)
 - Apple Silicon (M1, M2, M3, M4) or Intel Mac
 - Swift 5.9+ / Xcode 15+
+- For document scanning (`POST /scan`): Vision `VNDetectRectanglesRequest` and Core Image filters, available on macOS 13.0+
 
 ## Menu-bar app
 
@@ -98,9 +99,10 @@ swift run
 
 ## Proxy contract
 
-- `POST /ocr` and `PUT /runtime/config` require `Authorization: Bearer <NATIVE_AUTH_SECRET>` and `application/json`.
+- `POST /ocr`, `POST /scan`, and `PUT /runtime/config` require `Authorization: Bearer <NATIVE_AUTH_SECRET>` and `application/json`.
+- `POST /scan` dispatch is image-only: the worker runs `VNDetectRectanglesRequest` perspective correction and CIImage contrast enhancement, encodes a clean JPEG, and uploads it back to the proxy-issued signed PUT URL instead of posting a JSON callback. The signed PUT is HMAC-SHA256 verified by the proxy over `<scanId>.<attemptId>` and capped at 100 MiB; no `NATIVE_AUTH_SECRET` is sent on that PUT (the signature is the authority).
 - Dispatches are accepted with `202 {"attemptId":"...","status":"accepted"}`; capacity exhaustion returns `503` with `Retry-After`.
 - `/capacity` reports the operator ceiling, adaptive effective limit, active jobs, available units, and image/PDF unit costs. The proxy uses these weights to skip jobs that do not currently fit without blocking smaller eligible work. Pressure decreases apply immediately; recovery is deliberately gradual and never cancels accepted work.
 - The worker downloads the proxy-issued HTTP(S) object URL, caps it at 100 MiB, and verifies `input.sha256` before recognition.
-- Completion and failure callbacks are capped at 1 MiB and signed over `nodeId.timestamp.eventId.<raw-body>` using HMAC-SHA256.
+- Completion and failure (OCR) callbacks are capped at 1 MiB and signed over `nodeId.timestamp.eventId.<raw-body>` using HMAC-SHA256.
 - Request JSON rejects unknown fields, unsupported media types, malformed identifiers, oversized options, and non-HTTP(S) URLs.

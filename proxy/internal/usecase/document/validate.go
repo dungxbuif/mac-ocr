@@ -173,6 +173,9 @@ func ValidateOptions(opts *domain.OCROptions) (*domain.OCROptions, error) {
 	}
 
 	out := *opts
+	if out.ProcessingMode != "" {
+		return nil, errors.New("processingMode is reserved for internal use")
+	}
 	if out.Languages == nil {
 		out.Languages = []string{"vi-VN", "en-US"}
 	}

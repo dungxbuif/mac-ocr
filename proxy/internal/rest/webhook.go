@@ -19,6 +19,7 @@ import (
 
 const maxWebhookRequestBytes = 1024 * 1024
 const maxNativeVerifyBytes = 4 * 1024
+const maxNativeScanOutputBytes = 100 * 1024 * 1024
 
 type WebhookHandler struct {
 	docs       domain.DocumentRepository
@@ -29,6 +30,50 @@ type WebhookHandler struct {
 	notifier   domain.NotificationPublisher
 	results    domain.ResultCache
 	resultTTL  time.Duration
+}
+
+// HandleNativeScanOutput stores the binary scan before its small completion
+// callback is accepted. The body is signed with the same native HMAC scheme as
+// callbacks, so an object key cannot be populated by an unauthenticated peer.
+func (h *WebhookHandler) HandleNativeScanOutput(c *gin.Context) {
+	scanID, attemptID := c.Param("scanId"), c.Param("attemptId")
+	nodeID, ts, eventID, sig := c.GetHeader("X-Native-Node-Id"), c.GetHeader("X-Native-Timestamp"), c.GetHeader("X-Native-Event-Id"), c.GetHeader("X-Native-Signature")
+	if eventID != "out_"+scanID+"_"+attemptID || c.ContentType() != "image/jpeg" {
+		RespondProblem(c, errs.InvalidInput("invalid scan output request"))
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxNativeScanOutputBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		if respondRequestTooLarge(c, err, maxNativeScanOutputBytes) {
+			return
+		}
+		RespondProblem(c, errs.InvalidInput("failed to read scan output"))
+		return
+	}
+	if len(body) == 0 {
+		RespondProblem(c, errs.InvalidInput("scan output is empty"))
+		return
+	}
+	if h.authSecret == "" || native.VerifyWebhook(h.authSecret, nodeID, ts, eventID, body, sig) != nil {
+		RespondProblem(c, errs.Unauthorized("invalid native scan output signature"))
+		return
+	}
+	doc, err := h.docs.GetByID(c.Request.Context(), scanID)
+	if err != nil {
+		RespondProblem(c, errs.NotFound("scan not found"))
+		return
+	}
+	if doc.Status != domain.StatusProcessing || doc.AttemptID != attemptID || doc.Options == nil || doc.Options.ProcessingMode != "scan" {
+		RespondProblem(c, errs.New(errs.CodeStateConflict, http.StatusConflict, "Scan output does not match the active scan attempt"))
+		return
+	}
+	key := scanOutputKey(doc, attemptID)
+	if err := h.objects.Put(c.Request.Context(), key, bytes.NewReader(body), "image/jpeg"); err != nil {
+		RespondProblem(c, errs.ServiceUnavailable("scan output storage is unavailable", err))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "stored"})
 }
 
 func NewWebhookHandler(
@@ -145,7 +190,9 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 		RespondProblem(c, errs.InvalidInput("event identity does not match signed headers or required identifiers are missing"))
 		return
 	}
-	if (event.Type == "attempt.completed" && event.Result == nil) || (event.Type == "attempt.failed" && event.Error == "") || (event.Type != "attempt.completed" && event.Type != "attempt.failed") {
+	validOCREvent := (event.Type == "attempt.completed" && event.Result != nil) || (event.Type == "attempt.failed" && event.Error != "")
+	validScanEvent := (event.Type == "scan.completed" && event.ScanResult != nil) || (event.Type == "scan.failed" && event.Error != "")
+	if !validOCREvent && !validScanEvent {
 		RespondProblem(c, errs.InvalidInput("event type and payload are inconsistent"))
 		return
 	}
@@ -153,6 +200,10 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 	doc, err := h.docs.GetByID(c.Request.Context(), event.DocumentID)
 	if err != nil {
 		RespondProblem(c, errs.NotFound("document not found"))
+		return
+	}
+	if (event.Type == "scan.completed" || event.Type == "scan.failed") && (doc.Options == nil || doc.Options.ProcessingMode != "scan") {
+		RespondProblem(c, errs.New(errs.CodeStateConflict, http.StatusConflict, "Callback does not match a scan job"))
 		return
 	}
 	if doc.AttemptID == event.AttemptID && (doc.Status == domain.StatusCompleted || doc.Status == domain.StatusFailed) {
@@ -176,7 +227,29 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 		return
 	}
 
-	if event.Type == "attempt.completed" && event.Result != nil {
+	if event.Type == "scan.completed" && event.ScanResult != nil {
+		resultKey := scanOutputKey(doc, event.AttemptID)
+		exists, storageErr := h.objects.Exists(c.Request.Context(), resultKey)
+		if storageErr != nil || !exists {
+			RespondProblem(c, errs.ServiceUnavailable("scan output storage is unavailable", storageErr))
+			return
+		}
+		expiresAt := time.Now().Add(h.resultTTL)
+		terminalDoc := *doc
+		terminalDoc.Status, terminalDoc.ResultKey, terminalDoc.ResultExpiresAt = domain.StatusCompleted, resultKey, &expiresAt
+		outboxEvent, buildErr := h.buildNotificationEvent(&terminalDoc)
+		if buildErr != nil {
+			RespondError(c, buildErr)
+			return
+		}
+		if _, err = h.docs.FinalizeAttempt(c.Request.Context(), domain.DocumentFinalization{
+			DocumentID: doc.ID, AttemptID: event.AttemptID, TerminalEventID: event.EventID,
+			Status: domain.StatusCompleted, ResultKey: resultKey, ResultExpiresAt: &expiresAt,
+		}, outboxEvent); err != nil {
+			RespondError(c, err)
+			return
+		}
+	} else if event.Type == "attempt.completed" && event.Result != nil {
 		resultBytes, err := json.Marshal(event.Result)
 		if err != nil {
 			RespondError(c, fmt.Errorf("encode OCR result: %w", err))
@@ -214,7 +287,7 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 				return
 			}
 		}
-	} else if event.Type == "attempt.failed" {
+	} else if event.Type == "attempt.failed" || event.Type == "scan.failed" {
 		terminalDoc := *doc
 		terminalDoc.Status, terminalDoc.ErrorDetail = domain.StatusFailed, event.Error
 		outboxEvent, buildErr := h.buildNotificationEvent(&terminalDoc)
@@ -235,12 +308,27 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 	if h.sched != nil {
 		h.sched.Wake()
 	}
+	if h.notifier != nil {
+		publishedDoc := *doc
+		if event.Type == "attempt.completed" || event.Type == "scan.completed" {
+			publishedDoc.Status = domain.StatusCompleted
+		} else {
+			publishedDoc.Status, publishedDoc.ErrorDetail = domain.StatusFailed, event.Error
+		}
+		if err := h.notifier.PublishDocument(c.Request.Context(), &publishedDoc); err != nil {
+			h.logger.Error("failed to publish SSE lifecycle event", "documentID", doc.ID, "error", err)
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":     "acknowledged",
 		"eventId":    event.EventID,
 		"documentId": event.DocumentID,
 	})
+}
+
+func scanOutputKey(doc *domain.Document, attemptID string) string {
+	return fmt.Sprintf("scan-results/%d/%s/%s.jpg", doc.UserID, doc.ID, attemptID)
 }
 
 func (h *WebhookHandler) buildNotificationEvent(doc *domain.Document) (*domain.NotificationEvent, error) {

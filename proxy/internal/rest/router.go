@@ -23,6 +23,7 @@ func NewRouter(
 	health *HealthHandler,
 	auth *AuthHandler,
 	doc *DocumentHandler,
+	scan *ScanHandler,
 	batch *BatchHandler,
 	upload *UploadHandler,
 	cap *CapabilitiesHandler,
@@ -55,6 +56,7 @@ func NewRouter(
 	engine.Any("/admin/*filepath", gin.WrapH(http.StripPrefix("/admin", admin.Handler())))
 
 	engine.POST("/webhooks/native/events", webhook.HandleNativeEvent)
+	engine.PUT("/webhooks/native/events/scans/:scanId/:attemptId/output", webhook.HandleNativeScanOutput)
 	engine.POST("/webhooks/native/verify", webhook.HandleNativeVerify)
 	engine.POST("/mcp", auth.RequireAPIKey(), mcp.Post)
 	engine.GET("/mcp", auth.RequireAPIKey(), mcp.Get)
@@ -100,6 +102,7 @@ func NewRouter(
 	accountAdmin.POST("/users/:id/config/reset-quota", auth.ResetDocQuota)
 
 	registerDocRoutes(api.Group("/documents", auth.RequireAPIKey()), doc)
+	registerScanRoutes(api.Group("/scans", auth.RequireAPIKey()), scan)
 
 	registerBatchRoutes(api.Group("/batches", auth.RequireAPIKey()), batch)
 	api.POST("/uploads/presign", auth.RequireAPIKey(), upload.Presign)
@@ -123,6 +126,11 @@ func NewRouter(
 }
 
 func registerDocRoutes(g *gin.RouterGroup, h *DocumentHandler) {
+	g.POST("", h.Submit)
+	g.GET("/:id", h.Get)
+}
+
+func registerScanRoutes(g *gin.RouterGroup, h *ScanHandler) {
 	g.POST("", h.Submit)
 	g.GET("/:id", h.Get)
 }

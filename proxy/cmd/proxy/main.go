@@ -100,6 +100,7 @@ func main() {
 	healthHandler := rest.NewHealthHandler(systemSvc)
 	authHandler := rest.NewAuthHandler(authSvc)
 	docHandler := rest.NewDocumentHandler(docSvc, cfg.PublicAPIBaseURL, cfg.PublicDocsBaseURL)
+	scanHandler := rest.NewScanHandler(docSvc, cfg.PublicAPIBaseURL)
 	batchHandler := rest.NewBatchHandler(docSvc, cfg.PublicAPIBaseURL, cfg.PublicDocsBaseURL)
 	uploadHandler := rest.NewUploadHandlerWithReservationTTL(objRepo, cfg.MaxUploadBytes, configRepo, cfg.UploadTTL, authSvc)
 	capHandler := rest.NewCapabilitiesHandler()
@@ -112,6 +113,7 @@ func main() {
 		healthHandler,
 		authHandler,
 		docHandler,
+		scanHandler,
 		batchHandler,
 		uploadHandler,
 		capHandler,

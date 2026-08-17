@@ -31,8 +31,8 @@ func NewService(repo domain.NotificationRepository, apiBaseURL string, logger *s
 }
 
 func (s *Service) PublishDocument(ctx context.Context, doc *domain.Document) error {
-	event, err := s.BuildDocumentEvent(doc)
-	if err != nil || event == nil {
+	event, err := s.buildEvent(doc, "sse")
+	if err != nil {
 		return err
 	}
 	return s.repo.Create(ctx, event)
@@ -42,23 +42,47 @@ func (s *Service) BuildDocumentEvent(doc *domain.Document) (*domain.Notification
 	if doc.Notification == nil || doc.Notification.Type == "" {
 		return nil, nil
 	}
+	return s.buildEvent(doc, doc.Notification.Type)
+}
+
+func (s *Service) buildEvent(doc *domain.Document, channel string) (*domain.NotificationEvent, error) {
 	eventID := newEventID()
+	resourceType, resourceID := "document", doc.ID
+	resourcePath := "/v1/documents/" + doc.ID
+	if doc.Options != nil && doc.Options.ProcessingMode == "scan" {
+		resourceType = "scan"
+		resourcePath = "/v1/scans/" + doc.ID
+	}
 	payload, err := json.Marshal(map[string]any{
-		"eventId":    eventID,
-		"type":       "document." + string(doc.Status),
-		"documentId": doc.ID,
-		"status":     doc.Status,
-		"resource":   s.apiBaseURL + "/v1/documents/" + doc.ID,
-		"occurredAt": time.Now().UTC(),
+		"eventId":           eventID,
+		"type":              resourceType + "." + string(doc.Status),
+		resourceType + "Id": resourceID,
+		"status":            doc.Status,
+		"resource":          s.apiBaseURL + resourcePath,
+		"occurredAt":        time.Now().UTC(),
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &domain.NotificationEvent{
-		ID: eventID, UserID: doc.UserID, DocumentID: doc.ID, Type: "document." + string(doc.Status),
-		Channel: doc.Notification.Type, WebhookURL: doc.Notification.URL,
-		WebhookSecret: doc.Notification.Secret, Payload: payload,
+		ID: eventID, UserID: doc.UserID, DocumentID: doc.ID, Type: resourceType + "." + string(doc.Status),
+		Channel: channel, WebhookURL: notificationURL(doc, channel),
+		WebhookSecret: notificationSecret(doc, channel), Payload: payload,
 	}, nil
+}
+
+func notificationURL(doc *domain.Document, channel string) string {
+	if channel == "webhook" && doc.Notification != nil {
+		return doc.Notification.URL
+	}
+	return ""
+}
+
+func notificationSecret(doc *domain.Document, channel string) string {
+	if channel == "webhook" && doc.Notification != nil {
+		return doc.Notification.Secret
+	}
+	return ""
 }
 
 func (s *Service) ListSSE(ctx context.Context, userID int64, afterID string) ([]domain.NotificationEvent, error) {

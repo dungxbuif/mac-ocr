@@ -45,6 +45,44 @@ public struct NativeCallbackRef: Codable {
     }
 }
 
+public struct NativeScanOutputRef: Codable {
+    public var url: String
+    public var mediaType: String
+
+    public init(url: String, mediaType: String = "image/jpeg") {
+        self.url = url
+        self.mediaType = mediaType
+    }
+}
+
+public struct NativeScanRequest: Codable {
+    public var documentId: String
+    public var attemptId: String
+    public var input: NativeInputRef
+    public var output: NativeScanOutputRef
+    public var callback: NativeCallbackRef
+
+    public init(documentId: String, attemptId: String, input: NativeInputRef, output: NativeScanOutputRef, callback: NativeCallbackRef) {
+        self.documentId = documentId
+        self.attemptId = attemptId
+        self.input = input
+        self.output = output
+        self.callback = callback
+    }
+}
+
+public struct NativeScanResult: Codable {
+    public var mediaType: String
+    public var sizeBytes: Int
+    public var sha256: String
+
+    public init(mediaType: String, sizeBytes: Int, sha256: String) {
+        self.mediaType = mediaType
+        self.sizeBytes = sizeBytes
+        self.sha256 = sha256
+    }
+}
+
 public struct NativeOCRRequest: Codable {
     public var documentId: String
     public var pageId: String?
@@ -178,6 +216,7 @@ public struct NativeEvent: Codable {
     public var attemptId: String
     public var documentId: String
     public var result: OCRResult?
+    public var scanResult: NativeScanResult?
     public var error: String?
     public var capacity: NativeCapacity
     public var occurredAt: String
@@ -191,6 +230,7 @@ public struct NativeEvent: Codable {
         attemptId: String,
         documentId: String,
         result: OCRResult? = nil,
+        scanResult: NativeScanResult? = nil,
         error: String? = nil,
         capacity: NativeCapacity,
         occurredAt: String
@@ -203,6 +243,7 @@ public struct NativeEvent: Codable {
         self.attemptId = attemptId
         self.documentId = documentId
         self.result = result
+        self.scanResult = scanResult
         self.error = error
         self.capacity = capacity
         self.occurredAt = occurredAt

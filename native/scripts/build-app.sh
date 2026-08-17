@@ -19,6 +19,8 @@ PDF_JOB_UNITS="${MACOCR_PDF_JOB_UNITS:-3}"
 CAPACITY_RECOVERY_SAMPLES="${MACOCR_CAPACITY_RECOVERY_SAMPLES:-5}"
 DEFAULT_NODE_ID="${MACOCR_DEFAULT_NODE_ID:-${NATIVE_NODE_ID:-ocr-native-01}}"
 LOG_RETENTION_DAYS="${MACOCR_LOG_RETENTION_DAYS:-30}"
+APP_VERSION="${MACOCR_VERSION:-1.0.3}"
+APP_BUILD_NUMBER="${MACOCR_BUILD_NUMBER:-3}"
 
 cd "$NATIVE_DIR"
 swift build -c release
@@ -39,8 +41,8 @@ cat >"$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Mac OCR Native</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.0.3</string>
+  <key>CFBundleVersion</key><string>3</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
@@ -76,6 +78,8 @@ plutil -replace MacOCRPDFJobUnits -string "$PDF_JOB_UNITS" "$CONTENTS_DIR/Info.p
 plutil -replace MacOCRCapacityRecoverySamples -string "$CAPACITY_RECOVERY_SAMPLES" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRDefaultNodeID -string "$DEFAULT_NODE_ID" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRLogRetentionDays -string "$LOG_RETENTION_DAYS" "$CONTENTS_DIR/Info.plist"
+plutil -replace CFBundleShortVersionString -string "$APP_VERSION" "$CONTENTS_DIR/Info.plist"
+plutil -replace CFBundleVersion -string "$APP_BUILD_NUMBER" "$CONTENTS_DIR/Info.plist"
 
 codesign --force --deep --sign - "$APP_DIR"
 printf '%s\n' "$APP_DIR"

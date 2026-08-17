@@ -45,16 +45,24 @@ func NewClientWithHTTPClient(baseURL, authSecret string, httpClient *http.Client
 }
 
 func (c *Client) DispatchOCR(ctx context.Context, req *domain.NativeOCRRequest) error {
+	return c.dispatch(ctx, "/ocr", req, req.AttemptID)
+}
+
+func (c *Client) DispatchScan(ctx context.Context, req *domain.NativeScanRequest) error {
+	return c.dispatch(ctx, "/scan", req, req.AttemptID)
+}
+
+func (c *Client) dispatch(ctx context.Context, path string, payload any, attemptID string) error {
 	if c.baseURL == "" {
 		return fmt.Errorf("native base URL not configured")
 	}
 
-	body, err := json.Marshal(req)
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal native request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/ocr", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build dispatch request: %w", err)
 	}
@@ -87,7 +95,7 @@ func (c *Client) DispatchOCR(ctx context.Context, req *domain.NativeOCRRequest) 
 		AttemptID string `json:"attemptId"`
 		Status    string `json:"status"`
 	}
-	if err := json.Unmarshal(body, &accepted); err != nil || accepted.AttemptID != req.AttemptID || accepted.Status != "accepted" {
+	if err := json.Unmarshal(body, &accepted); err != nil || accepted.AttemptID != attemptID || accepted.Status != "accepted" {
 		return fmt.Errorf("native returned an invalid acceptance response")
 	}
 

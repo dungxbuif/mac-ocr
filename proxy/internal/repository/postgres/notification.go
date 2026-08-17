@@ -31,7 +31,7 @@ func (r *NotificationRepository) Create(ctx context.Context, event *domain.Notif
 	_, err = r.pool.Exec(ctx, `INSERT INTO notification_events
 		(id, user_id, document_id, event_type, channel, webhook_url, webhook_secret, payload_json)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		ON CONFLICT (document_id, event_type) DO NOTHING`, event.ID, event.UserID, event.DocumentID,
+		ON CONFLICT (document_id, event_type, channel) DO NOTHING`, event.ID, event.UserID, event.DocumentID,
 		event.Type, event.Channel, nilIfEmpty(event.WebhookURL), secret, []byte(event.Payload))
 	if err != nil {
 		return fmt.Errorf("insert notification event: %w", err)
