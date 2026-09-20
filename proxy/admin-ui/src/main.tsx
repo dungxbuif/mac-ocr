@@ -89,6 +89,7 @@ function App() {
   const [session, setSession] = useState<{ loading: boolean; user: User | null }>({ loading: true, user: null });
   const [csrf, setCsrf] = useState(() => getCookie("macocr_csrf"));
   const [toast, setToast] = useState("");
+  const [adminView, setAdminView] = useState<"users" | "keys">("users");
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -169,10 +170,31 @@ function App() {
           </div>
         </div>
         <nav className="nav">
-          <a href="#/portal" className="nav-link active">
-            {isAdmin ? <UsersIcon size={16} /> : <Key size={16} />}
-            <span>{isAdmin ? "User Accounts & Quotas" : "API Credentials & Limits"}</span>
-          </a>
+          {isAdmin ? (
+            <>
+              <button
+                type="button"
+                className={`nav-link nav-button ${adminView === "users" ? "active" : ""}`}
+                onClick={() => setAdminView("users")}
+              >
+                <UsersIcon size={16} />
+                <span>User Accounts & Quotas</span>
+              </button>
+              <button
+                type="button"
+                className={`nav-link nav-button ${adminView === "keys" ? "active" : ""}`}
+                onClick={() => setAdminView("keys")}
+              >
+                <Key size={16} />
+                <span>My API Keys</span>
+              </button>
+            </>
+          ) : (
+            <a href="#/portal" className="nav-link active">
+              <Key size={16} />
+              <span>API Credentials & Limits</span>
+            </a>
+          )}
         </nav>
         <div className="sidebar-footer">
           <a href="/" target="_blank" rel="noreferrer" className="nav-link" style={{ fontSize: "12px" }}>
@@ -194,7 +216,7 @@ function App() {
       </aside>
 
       <main className="workspace">
-        {isAdmin ? (
+        {isAdmin && adminView === "users" ? (
           <AdminUsersListPage
             api={api}
             notify={notify}

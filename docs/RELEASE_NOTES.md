@@ -1,3 +1,18 @@
+# Release Notes — v1.0.4
+
+**Release Date:** September 20, 2026
+
+## Version 1.0.4 — Admin API key navigation
+
+- Administrators can switch between account administration and their own API key
+  management from the sidebar. Creating, listing, changing rate limits and revoking
+  an administrator's keys reuse the existing authenticated user endpoints.
+- OCR execution remains on the direct scheduler. The experimental RelayHub queue
+  transport is isolated on branch `codex/ocr-relayhub-transport` after its burst
+  latency benchmark; it is not enabled by this release.
+
+---
+
 # Release Notes — v1.0.3
 
 **Release Date:** August 16, 2026
