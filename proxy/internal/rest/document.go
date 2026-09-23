@@ -32,9 +32,11 @@ func NewDocumentHandler(svc *document.Service, apiBaseURL, docsBaseURL string) *
 }
 
 type submitDocJSONReq struct {
-	Input        inputReq                   `json:"input" binding:"required"`
-	Options      *domain.OCROptions         `json:"options,omitempty"`
-	Notification *domain.NotificationConfig `json:"notification,omitempty"`
+	Input         inputReq                   `json:"input" binding:"required"`
+	Options       *domain.OCROptions         `json:"options,omitempty"`
+	Notification  *domain.NotificationConfig `json:"notification,omitempty"`
+	Mode          string                     `json:"mode,omitempty"`
+	WaitTimeoutMs int                        `json:"waitTimeoutMs,omitempty"`
 }
 
 type inputReq struct {
@@ -43,6 +45,11 @@ type inputReq struct {
 }
 
 const maxSingleJSONRequestBytes = 36 * 1024 * 1024
+
+const (
+	defaultWaitTimeout = 15 * time.Second
+	maxWaitTimeout     = 30 * time.Second
+)
 
 var documentIDPattern = regexp.MustCompile(`^doc_[A-Za-z0-9_-]{1,80}$`)
 
@@ -78,6 +85,11 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 		RespondProblem(c, errs.InvalidInput(err.Error()))
 		return
 	}
+	wait, waitTimeout, err := submitWaitConfig(req.Mode, req.WaitTimeoutMs)
+	if err != nil {
+		RespondProblem(c, errs.InvalidInput(err.Error()))
+		return
+	}
 	input, err := req.Input.source()
 	if err != nil {
 		RespondError(c, err)
@@ -92,6 +104,18 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 
 	locationURL := fmt.Sprintf("%s/v1/documents/%s", h.apiBaseURL, doc.ID)
 	c.Header("Location", locationURL)
+	if wait {
+		waited, terminal, err := h.svc.WaitForDocument(c.Request.Context(), k.UserID, doc.ID, waitTimeout)
+		if err != nil {
+			RespondError(c, err)
+			return
+		}
+		if terminal {
+			c.JSON(http.StatusOK, h.documentResponse(waited))
+			return
+		}
+		doc = waited
+	}
 	c.Header("Retry-After", "3")
 
 	c.JSON(http.StatusAccepted, gin.H{
@@ -100,6 +124,34 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 		"createdAt":  doc.CreatedAt,
 		"links":      h.documentLinks(doc.ID),
 	})
+}
+
+func submitWaitConfig(mode string, timeoutMs int) (bool, time.Duration, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "queue"
+	}
+	if timeoutMs < 0 {
+		return false, 0, fmt.Errorf("waitTimeoutMs must be greater than or equal to zero")
+	}
+	switch mode {
+	case "queue":
+		if timeoutMs != 0 {
+			return false, 0, fmt.Errorf("waitTimeoutMs requires mode=wait")
+		}
+		return false, 0, nil
+	case "wait":
+		if timeoutMs == 0 {
+			return true, defaultWaitTimeout, nil
+		}
+		timeout := time.Duration(timeoutMs) * time.Millisecond
+		if timeout < time.Second || timeout > maxWaitTimeout {
+			return false, 0, fmt.Errorf("waitTimeoutMs must be between 1000 and 30000")
+		}
+		return true, timeout, nil
+	default:
+		return false, 0, fmt.Errorf("mode must be queue or wait")
+	}
 }
 
 func decodeStrictRequestJSON(c *gin.Context, target any) error {

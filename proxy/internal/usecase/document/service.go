@@ -243,6 +243,46 @@ func (s *Service) GetDocument(ctx context.Context, userID int64, docID string) (
 	return doc, nil
 }
 
+// WaitForDocument performs bounded polling for a single document submission.
+// It returns terminal=true only when the document reached a terminal state;
+// a timeout returns the latest pending document so the caller can resume polling.
+func (s *Service) WaitForDocument(ctx context.Context, userID int64, docID string, timeout time.Duration) (*domain.Document, bool, error) {
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		doc, err := s.GetDocument(ctx, userID, docID)
+		if err != nil {
+			return nil, false, err
+		}
+		if isTerminalStatus(doc.Status) {
+			return doc, true, nil
+		}
+
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, false, ctx.Err()
+		case <-waitCtx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return doc, false, nil
+		case <-timer.C:
+		}
+	}
+}
+
+func isTerminalStatus(status domain.DocumentStatus) bool {
+	return status == domain.StatusCompleted || status == domain.StatusFailed || status == domain.StatusCancelled
+}
+
 func (s *Service) GetDocumentStatus(ctx context.Context, userID int64, docID string) (*domain.Document, error) {
 	doc, err := s.docs.GetByID(ctx, docID)
 	if err != nil {

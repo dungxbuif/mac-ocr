@@ -211,6 +211,45 @@ func TestDocumentREST_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestDocumentREST_WaitModeReturnsTerminalDocument(t *testing.T) {
+	validPNGBytes, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+	userRepo := newMockUserRepo()
+	cfgRepo := newMockConfigRepo()
+	keyRepo := newMockKeyRepoFull()
+	objRepo := newMockObjectRepoFull()
+	docRepo := newMockDocRepoAdapter()
+	docRepo.completeAfter = 2
+	docRepo.terminalState = domain.StatusFailed
+	userRepo.users[1] = &domain.User{ID: 1, Email: "test@user.com"}
+	cfgRepo.configs[1] = &domain.AccountConfig{UserID: 1, RateLimitRPM: 100, DocQuota: 10}
+	docRepo.configs = cfgRepo
+
+	authSvc := auth.NewService(userRepo, cfgRepo, keyRepo, nil)
+	docSvc := document.NewService(docRepo, objRepo, authSvc, nil, nil)
+	genKey, err := authSvc.GenerateKey(nil, 1, "test-key", 100)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+	router := setupDocTestRouter(docSvc, authSvc)
+	body, _ := json.Marshal(map[string]any{
+		"mode":          "wait",
+		"waitTimeoutMs": 1000,
+		"input":         map[string]string{"base64": base64.StdEncoding.EncodeToString(validPNGBytes)},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/documents", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+genKey.Key)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"failed"`) {
+		t.Fatalf("expected terminal 200 response, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Header().Get("Retry-After") != "" {
+		t.Fatalf("terminal wait response must not include Retry-After")
+	}
+}
+
 func TestPresignedUploadFlowAndLimits(t *testing.T) {
 	validPNGBytes, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 	userRepo := newMockUserRepo()

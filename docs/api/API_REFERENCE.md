@@ -60,6 +60,18 @@ Request:
 }
 ```
 
+The default response mode is asynchronous queueing. To keep one request open for a short OCR job, set the top-level `mode` to `wait`:
+
+```json
+{
+  "mode": "wait",
+  "waitTimeoutMs": 15000,
+  "input": {"url": "https://files.example.com/invoice.pdf"}
+}
+```
+
+`mode` accepts `queue` (the default) or `wait`. `waitTimeoutMs` is optional, defaults to 15 seconds, and is capped at 30 seconds. In wait mode, a completed or failed document returns the same document representation as `GET /v1/documents/{documentId}` with HTTP `200`. If the timeout expires first, the document remains durable and the endpoint returns the normal `202` receipt with `Retry-After`; clients should poll the returned document link. Batch submissions do not support wait mode.
+
 Response:
 
 ```json

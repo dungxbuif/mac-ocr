@@ -88,7 +88,7 @@ curl --fail --silent --show-error \
   -H "Authorization: Bearer $OCR_API_KEY"
 ```
 
-While OCR is running, the response status is `queued` or `processing`. Follow the `Retry-After` response header before polling again. A completed response includes `result` directly; there is no separate `/result` endpoint.
+While OCR is running, the response status is `queued` or `processing`. The default submission mode returns immediately with `202`; follow the `Retry-After` response header before polling again. For a short synchronous-style request, add top-level `"mode": "wait"` and optionally `"waitTimeoutMs": 15000` to `POST /v1/documents`. A completed or failed job returns its terminal document response with `200`; if the bounded wait expires, the API falls back to the normal `202` receipt and the same polling flow. A completed response includes `result` directly; there is no separate `/result` endpoint.
 
 ```json
 {

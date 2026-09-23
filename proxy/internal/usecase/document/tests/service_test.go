@@ -20,6 +20,8 @@ type mockDocRepo struct {
 	createManyErr error
 	claimedIdx    int
 	configs       *mockConfigRepo
+	getByIDCalls  int
+	completeAfter int
 }
 
 func (m *mockDocRepo) CreateWithQuota(ctx context.Context, doc *domain.Document) (*domain.Document, error) {
@@ -78,6 +80,12 @@ func (m *mockDocRepo) GetByID(ctx context.Context, id string) (*domain.Document,
 	d, ok := m.docs[id]
 	if !ok {
 		return nil, domain.ErrNotFound
+	}
+	m.getByIDCalls++
+	if m.completeAfter > 0 && m.getByIDCalls >= m.completeAfter && d.Status == domain.StatusQueued {
+		expiresAt := time.Now().Add(time.Hour)
+		d.Status = domain.StatusCompleted
+		d.ResultExpiresAt = &expiresAt
 	}
 	return d, nil
 }
@@ -436,6 +444,54 @@ func TestGetDocumentReadsCompletedPayloadFromResultCache(t *testing.T) {
 	}
 	if doc.Result == nil || doc.Result.Text != "redis value" || doc.Result.PageCount != 2 {
 		t.Fatalf("result was not loaded from cache: %+v", doc.Result)
+	}
+}
+
+func TestWaitForDocumentReturnsTerminalDocument(t *testing.T) {
+	docRepo := newMockDocRepo()
+	docRepo.completeAfter = 2
+	cache := &mockResultCache{results: map[string]*domain.OCRResult{}}
+	userRepo := newMockUserRepo()
+	cfgRepo := newMockConfigRepo()
+	objRepo := newMockObjectRepo()
+	userRepo.users[7] = &domain.User{ID: 7, Email: "wait@test.com"}
+	cfgRepo.configs[7] = &domain.AccountConfig{UserID: 7, RateLimitRPM: 60, DocQuota: 5}
+
+	svc := document.NewService(docRepo, objRepo, auth.NewService(userRepo, cfgRepo, &mockKeyRepo{}, nil), nil, cache)
+	doc, err := svc.SubmitSingle(context.Background(), 7, document.InputSource{Type: "base64", Base64Data: base64.StdEncoding.EncodeToString(validPNGBytes)}, nil, nil)
+	if err != nil {
+		t.Fatalf("SubmitSingle: %v", err)
+	}
+	cache.results[doc.ID] = &domain.OCRResult{Text: "ready"}
+
+	got, terminal, err := svc.WaitForDocument(context.Background(), 7, doc.ID, 500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("WaitForDocument: %v", err)
+	}
+	if !terminal || got.Status != domain.StatusCompleted || got.Result == nil || got.Result.Text != "ready" {
+		t.Fatalf("expected completed document with result, terminal=%v doc=%+v", terminal, got)
+	}
+}
+
+func TestWaitForDocumentReturnsPendingDocumentWhenTimeoutExpires(t *testing.T) {
+	docRepo := newMockDocRepo()
+	userRepo := newMockUserRepo()
+	cfgRepo := newMockConfigRepo()
+	userRepo.users[7] = &domain.User{ID: 7, Email: "wait@test.com"}
+	cfgRepo.configs[7] = &domain.AccountConfig{UserID: 7, RateLimitRPM: 60, DocQuota: 5}
+
+	svc := document.NewService(docRepo, newMockObjectRepo(), auth.NewService(userRepo, cfgRepo, &mockKeyRepo{}, nil), nil, nil)
+	doc, err := svc.SubmitSingle(context.Background(), 7, document.InputSource{Type: "base64", Base64Data: base64.StdEncoding.EncodeToString(validPNGBytes)}, nil, nil)
+	if err != nil {
+		t.Fatalf("SubmitSingle: %v", err)
+	}
+
+	got, terminal, err := svc.WaitForDocument(context.Background(), 7, doc.ID, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("WaitForDocument: %v", err)
+	}
+	if terminal || got.Status != domain.StatusQueued {
+		t.Fatalf("expected queued timeout result, terminal=%v doc=%+v", terminal, got)
 	}
 }
 

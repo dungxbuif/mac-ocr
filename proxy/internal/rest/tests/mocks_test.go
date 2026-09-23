@@ -286,9 +286,12 @@ func (m *mockObjectRepoFull) Delete(_ context.Context, key string) error {
 }
 
 type mockDocRepoAdapter struct {
-	docs    map[string]*domain.Document
-	byUser  map[int64][]*domain.Document
-	configs *mockConfigRepoFull
+	docs          map[string]*domain.Document
+	byUser        map[int64][]*domain.Document
+	configs       *mockConfigRepoFull
+	getByIDCalls  int
+	completeAfter int
+	terminalState domain.DocumentStatus
 }
 
 func newMockDocRepoAdapter() *mockDocRepoAdapter {
@@ -353,6 +356,11 @@ func (m *mockDocRepoAdapter) GetByID(ctx context.Context, id string) (*domain.Do
 	d, ok := m.docs[id]
 	if !ok {
 		return nil, domain.ErrNotFound
+	}
+	m.getByIDCalls++
+	if m.completeAfter > 0 && m.getByIDCalls >= m.completeAfter && d.Status == domain.StatusQueued {
+		d.Status = m.terminalState
+		d.ErrorDetail = "test terminal state"
 	}
 	return d, nil
 }

@@ -54,7 +54,8 @@ func buildOpenAPISpec() gin.H {
 			})},
 			"/v1/documents": gin.H{
 				"post": secured(operationWithBody("Submit one document", "Documents", refSchema("DocumentSubmission"), gin.H{
-					"202": jsonResponse("Document accepted", refSchema("SubmissionReceipt")),
+					"200": jsonResponse("Wait-mode submission reached a terminal state", refSchema("Document")),
+					"202": jsonResponse("Document accepted or wait timeout elapsed", refSchema("SubmissionReceipt")),
 					"400": problemResponse("Invalid input, including malformed or oversized Base64", problem),
 					"401": problemResponse("Invalid or missing API key", problem),
 					"413": problemResponse("HTTP envelope or URL content exceeds its safety limit", problem),
@@ -124,6 +125,8 @@ func openAPISchemas() gin.H {
 		},
 		"DocumentSubmission": gin.H{"type": "object", "additionalProperties": false, "required": []string{"input"}, "properties": gin.H{
 			"input": refSchema("Input"), "options": refSchema("OCROptions"), "notification": refSchema("Notification"),
+			"mode":          gin.H{"type": "string", "enum": []string{"queue", "wait"}, "default": "queue", "description": "queue returns immediately with 202; wait holds the request for a bounded terminal result."},
+			"waitTimeoutMs": gin.H{"type": "integer", "minimum": 1000, "maximum": 30000, "default": 15000, "description": "Maximum wait time for mode=wait. The server caps this at 30 seconds."},
 		}},
 		"SubmissionReceipt": gin.H{"type": "object", "required": []string{"documentId", "status", "createdAt"}, "properties": gin.H{
 			"documentId": gin.H{"type": "string", "examples": []string{"doc_..."}}, "status": gin.H{"const": "queued"}, "createdAt": gin.H{"type": "string", "format": "date-time"}, "links": linksSchema(),
