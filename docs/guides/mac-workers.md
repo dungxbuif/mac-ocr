@@ -9,7 +9,7 @@ Install Mac OCR Native on each Mac you want to contribute OCR capacity. Each app
 
 ## Add a Mac
 
-1. Share the production app ZIP or DMG manually. Extract it and place **Mac OCR Native.app** in Applications.
+1. Share `Mac-OCR-Native-2.0.0-universal.dmg` or `Mac-OCR-Native-2.0.0-universal.zip` manually. For the DMG, open it and drag **Mac OCR Native.app** to Applications. For the ZIP, extract it and move the app to Applications.
 2. Open the app. The shared-key build already contains the production URL and connection key, so it connects automatically. Its status card shows worker state and capacity, with actions for logs, Launch at Login, quit, and an on/off switch. Connection details and settings are hidden and fixed by the release build.
 3. Sign in to the administration dashboard and open **Workers** at `/admin/workers` to confirm the Mac's connection and capacity. User Management, Workers, and Routing are available only to administrator accounts.
 
@@ -33,7 +33,7 @@ On a network interruption or sleep, a node becomes unavailable for new work. Act
 - HTTPS access to the job's input and result storage endpoints.
 - A supported macOS version and enough resources for the installed OCR engine.
 
-The existing Swift package requires macOS 13 or newer. The manually shared Universal release contains both Apple Silicon and Intel binaries. A Mac must remain awake to contribute capacity.
+The existing Swift package requires macOS 13 or newer. Release `2.0.0` build `7` is Universal and contains both Apple Silicon (`arm64`) and Intel (`x86_64`) binaries. Apple Silicon has physical production acceptance; the Intel slice has build and signature verification but no physical Intel acceptance run. A Mac must remain awake to contribute capacity.
 
 ## Upgrade from the old OCR tunnel
 

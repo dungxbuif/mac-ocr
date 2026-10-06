@@ -16,6 +16,18 @@ outbound WebSocket, and `https://ocr.dungxbuif.com`. It is ad-hoc signed for man
 sharing; there is no App Store submission or Developer ID requirement. macOS can
 still require explicit approval to open downloaded, unnotarized apps.
 
+The finalized private release is version `2.0.0` build `7`. The build directory
+contains these operator-facing artifacts:
+
+- `native/dist/Mac OCR Native.app`
+- `native/dist/Mac-OCR-Native-2.0.0-universal.dmg` for normal manual installation
+- `native/dist/Mac-OCR-Native-2.0.0-universal.zip` for direct sharing
+
+Open the DMG and drag the app to Applications. On first launch, use Finder's
+**Open** action if Gatekeeper asks for approval. The same DMG supports Apple
+Silicon and Intel Macs running macOS 13 or newer. The Intel slice is build and
+signature verified; physical release acceptance was performed on Apple Silicon.
+
 The private release build supplies `MACOCR_DEFAULT_AUTH_SECRET` from production.
 This embeds the shared server credential in the app, as requested. Keep the
 release within the intended distribution group. Rotate the key by updating

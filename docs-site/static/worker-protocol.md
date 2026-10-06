@@ -38,13 +38,14 @@ Input/output file bytes use job-specific HTTPS URLs rather than the socket.
 Shared mode uses Bearer-authenticated HTTPS completion/output; optional enrollment mode uses signed HTTPS native callback routes with the per-node secret.
 
 ## Administration
+Admin UI routes: /admin/users, /admin/workers, /admin/api-keys. The ordinary self-service route is /admin/portal. Direct loading, refresh, and browser back/forward are supported. User Management and Mac Workers & Routing render only for administrators, and the backing APIs independently enforce administrator sessions.
 GET /v1/admin/workers returns nodes, routes, and authMode (shared or enrollment).
 Node fields: nodeId, name, version, state, connected, paused, lastSeen, capacity, capabilities, revoked, metadata.
 Route fields: nodeId, documentId, attemptId, kind, status, createdAt.
 POST /v1/admin/workers/:nodeId/control
 Body: {"action":"pause|resume|drain|revoke"}.
 Authentication: administrator session cookie and X-CSRF-Token.
-Routing history is bounded operational history, not a permanent audit archive.
+The protected roster keeps machine metadata expanded and derives one effective displayed status from revocation, connectivity, pause state, and worker state. Routing history is bounded operational history, not a permanent audit archive.
 
 ## Deployment
 NATIVE_TRANSPORT=websocket selects outbound workers.
