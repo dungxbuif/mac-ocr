@@ -33,6 +33,12 @@ public final class WorkerController: ObservableObject {
     @Published public private(set) var port: Int
     @Published public private(set) var operatorLimit: Int
     public let nodeID: String
+    public let transport: String
+    public let authMode: String
+    @Published public var enrollmentToken = ""
+    @Published public var nodeName: String
+    private var outbound: OutboundConnector?
+    private var wakeObserver: NSObjectProtocol?
     @Published public private(set) var authSecret: String
     public let mode: String
 
@@ -58,7 +64,7 @@ public final class WorkerController: ObservableObject {
                 ?? fallback
         }
 
-        let defaultProxy = buildDefault("MacOCRDefaultProxyURL", fallback: "http://localhost:8080")
+        let defaultProxy = buildDefault("MacOCRDefaultProxyURL", fallback: "https://ocr.dungxbuif.com")
         // A built app bundle is the deployment authority for mode: its MacOCRDefaultMode
         // must win over an ambient APP_ENV (the proxy/web knob) so a production bundle
         // never silently flips to development on a host that exports APP_ENV. The native
@@ -78,8 +84,12 @@ public final class WorkerController: ObservableObject {
         self.mode = defaultMode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         self.port = defaults.object(forKey: "MacOCRNative.port") == nil ? defaultPort : defaults.integer(forKey: "MacOCRNative.port")
         self.operatorLimit = defaults.object(forKey: "MacOCRNative.operatorLimit") == nil ? defaultLimit : defaults.integer(forKey: "MacOCRNative.operatorLimit")
-        self.nodeID = defaultNode
-        self.authSecret = KeychainStore.read(account: secretAccount) ?? defaultSecret
+        self.transport = environment["MACOCR_TRANSPORT"] ?? buildDefault("MacOCRDefaultTransport", fallback: "websocket")
+        self.authMode = environment["MACOCR_AUTH_MODE"] ?? buildDefault("MacOCRDefaultAuthMode", fallback: "shared")
+        self.nodeID = self.transport == "http" ? defaultNode : (self.authMode == "shared" ? OutboundProtocol.machineNodeID(hardwareID: OutboundProtocol.hostHardwareID(), defaults: defaults) : OutboundProtocol.installationID(defaults: defaults))
+        self.nodeName = defaults.string(forKey: "MacOCRNative.nodeName") ?? Host.current().localizedName ?? "Mac worker"
+        self.authSecret = ""
+        self.authSecret = self.transport == "http" ? (KeychainStore.read(account: secretAccount) ?? defaultSecret) : (self.authMode == "shared" ? OutboundProtocol.sharedSecret(configured: defaultSecret, cached: KeychainStore.read(account: "shared-" + self.proxyURL)) : (defaults.string(forKey: "MacOCRNative.enrolledOrigin") == (defaults.string(forKey: "MacOCRNative.proxyURL") ?? defaultProxy) ? KeychainStore.read(account: "outbound-" + self.nodeID) ?? "" : ""))
         self.logs = logRecorder.snapshot()
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
         self.logRecorder.setDebugEnabled(self.mode == "debug")
@@ -100,7 +110,9 @@ public final class WorkerController: ObservableObject {
     public var isEnabled: Bool { startRequested || status == .online || status == .starting || status == .stopping }
     public var toggleDisabled: Bool { status == .starting || status == .stopping }
     public var configurationLocked: Bool { status != .offline && status != .error }
-    public var endpoint: String { "http://localhost:\(port)" }
+    public var usesSharedAuth: Bool { usesOutbound && authMode == "shared" }
+    public var usesOutbound: Bool { transport != "http" }
+    public var endpoint: String { usesOutbound ? proxyURL : "http://localhost:\(port)" }
     public var debugLoggingEnabled: Bool { mode == "debug" }
     public var configurationVerified: Bool {
         if case .verified = connectionStatus { return true }
@@ -113,12 +125,45 @@ public final class WorkerController: ObservableObject {
         statusDetail = configurationVerified ? "Connection verified; ready for manual Start" : "Configure and test the proxy connection"
     }
 
-    public func updateProxyURL(_ value: String) { proxyURL = value; configurationChanged() }
+    public func updateProxyURL(_ value: String) {
+        if usesOutbound && value != proxyURL { authSecret = "" }
+        proxyURL = value; configurationChanged()
+    }
     public func updatePort(_ value: Int) { port = value; configurationChanged() }
     public func updateOperatorLimit(_ value: Int) { operatorLimit = value; configurationChanged() }
     public func updateAuthSecret(_ value: String) { authSecret = value; configurationChanged() }
 
-    public func testConnection() { testConnection(startAfterSuccess: false) }
+    public func testConnection() { if usesOutbound { setEnabled(true) } else { testConnection(startAfterSuccess: false) } }
+
+    public func autoConnect() { if usesOutbound && !authSecret.isEmpty { setEnabled(true) } }
+
+    public func enroll() {
+        guard usesOutbound, !usesSharedAuth, !configurationLocked else { return }
+        connectionStatus = .testing
+        connectionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let origin = try OutboundProtocol.origin(proxyURL)
+                if mode == "production", origin.scheme != "https" { throw configurationError("Production requires HTTPS") }
+                var request = URLRequest(url: origin.appendingPathComponent("v1/workers/enroll"))
+                request.httpMethod = "POST"; request.timeoutInterval = 15
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(withJSONObject: ["token": enrollmentToken, "nodeId": nodeID, "name": nodeName])
+                let session = URLSession(configuration: .ephemeral, delegate: SameOriginRedirectDelegate(origin: origin), delegateQueue: nil)
+                defer { session.invalidateAndCancel() }
+                let (data, response) = try await session.data(for: request)
+                guard let response = response as? HTTPURLResponse, response.statusCode == 200 || response.statusCode == 201 else { throw configurationError("Enrollment rejected; create a fresh code in dashboard") }
+                struct Credential: Decodable { let nodeId: String; let secret: String }
+                let credential = try JSONDecoder().decode(Credential.self, from: data)
+                guard credential.nodeId == nodeID, !credential.secret.isEmpty else { throw configurationError("Invalid enrollment response") }
+                try KeychainStore.write(credential.secret, account: "outbound-" + nodeID)
+                authSecret = credential.secret; enrollmentToken = ""
+                defaults.set(proxyURL, forKey: "MacOCRNative.enrolledOrigin")
+                persistNonSecretConfiguration(); connectionStatus = .verified
+                setEnabled(true)
+            } catch { connectionStatus = .failed(error.localizedDescription); statusDetail = error.localizedDescription }
+        }
+    }
 
     private func testConnection(startAfterSuccess: Bool) {
         guard !configurationLocked else { return }
@@ -181,6 +226,7 @@ public final class WorkerController: ObservableObject {
 
     public func setEnabled(_ enabled: Bool) {
         if enabled {
+            if usesOutbound { startService(); return }
             startRequested = true
             if configurationVerified {
                 startService()
@@ -203,7 +249,14 @@ public final class WorkerController: ObservableObject {
 
     public func startService() {
         guard status == .offline || status == .error else { return }
-        guard configurationVerified else {
+        // Never create a second resource allocator while a disconnected worker
+        // still owns accepted jobs. Drain the old actor before allowing restart.
+        if workerState != nil {
+            statusDetail = "Previous jobs are draining; wait before reconnecting"
+            stopService()
+            return
+        }
+        guard usesOutbound || configurationVerified else {
             statusDetail = "Test the proxy connection before starting"
             startRequested = false
             return
@@ -218,11 +271,30 @@ public final class WorkerController: ObservableObject {
 
         status = .starting
         startRequested = true
-        statusDetail = "Binding local port \(port)…"
+        statusDetail = usesOutbound ? "Connecting to proxy…" : "Binding local port \(port)…"
         let currentGeneration = UUID()
         generation = currentGeneration
         let handler: NativeLogHandler = { [weak recorder = logRecorder] level, message in recorder?.emit(level, message) }
-        let state = NativeWorkerState(operatorLimit: operatorLimit, authSecret: authSecret, nodeId: nodeID, logger: handler)
+        let state = NativeWorkerState(operatorLimit: operatorLimit, authSecret: authSecret, nodeId: nodeID, bearerCallbacks: usesSharedAuth, logger: handler)
+        if usesOutbound {
+            workerState = state
+            do {
+                let request = try OutboundProtocol.connectRequest(origin: proxyURL, nodeID: nodeID, secret: authSecret)
+                let connector = OutboundConnector(state: state, request: request, name: nodeName, limit: operatorLimit) { [weak self] connected, detail in
+                    guard let self, self.generation == currentGeneration, self.status != .stopping else { return }
+                    self.status = connected ? .online : (detail.hasPrefix("Credential rejected") ? .error : .starting); self.statusDetail = detail
+                    if self.status == .error {
+                        self.startRequested = false
+                        Task { _ = await state.updateOperatorLimit(0) }
+                    }
+                    if connected { self.connectionStatus = .verified }
+                }
+                outbound = connector; connector.start()
+                if wakeObserver == nil { wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.outbound?.reconnect() } } }
+                beginCapacityMonitoring(state: state, generation: currentGeneration)
+            } catch { status = .error; startRequested = false; statusDetail = error.localizedDescription }
+            return
+        }
         let newServer = NativeHTTPServer(port: UInt16(port), state: state, logger: handler)
         newServer.lifecycleHandler = { [weak self] lifecycle, detail in
             DispatchQueue.main.async {
@@ -248,7 +320,9 @@ public final class WorkerController: ObservableObject {
     public func stopService() {
         guard status == .online || status == .starting || status == .error else { return }
         status = .stopping
-        statusDetail = "Stopping listener; accepted jobs will finish"
+        statusDetail = "Draining accepted jobs before disconnecting"
+        if let state = workerState { Task { _ = await state.updateOperatorLimit(0) } }
+        outbound?.stop(); outbound = nil
         log(.info, "Stopping native listener")
         server?.stop()
         server = nil
@@ -296,9 +370,14 @@ public final class WorkerController: ObservableObject {
         guard let url = URL(string: trimmedURL), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme), url.host != nil, url.user == nil, url.password == nil else {
             throw configurationError("Proxy URL must be an HTTP(S) origin without credentials")
         }
-        guard (1...65_535).contains(port) else { throw configurationError("Local port must be between 1 and 65535") }
+        guard usesOutbound || (1...65_535).contains(port) else { throw configurationError("Local port must be between 1 and 65535") }
         guard (0...256).contains(operatorLimit) else { throw configurationError("Concurrency ceiling must be between 0 and 256") }
         guard mode == "debug" || mode == "development" || mode == "production" else { throw configurationError("Mode must be debug, development, or production") }
+        if usesOutbound {
+            _ = try OutboundProtocol.origin(trimmedURL)
+            if mode == "production", url.scheme != "https" { throw configurationError("Production requires HTTPS") }
+            guard !authSecret.isEmpty else { throw configurationError("Configure the shared key or enroll this Mac first") }
+        }
         guard !authSecret.isEmpty else { throw configurationError("Native shared key is required") }
         if mode == "production" && (authSecret == "change-me-in-production" || authSecret.utf8.count < 32) {
             throw configurationError("Production native shared key must be non-default and at least 32 bytes")
@@ -307,10 +386,11 @@ public final class WorkerController: ObservableObject {
 
     private func persistConfiguration() throws {
         persistNonSecretConfiguration()
-        try KeychainStore.write(authSecret, account: secretAccount)
+        try KeychainStore.write(authSecret, account: usesSharedAuth ? "shared-" + proxyURL : (usesOutbound ? "outbound-" + nodeID : secretAccount))
     }
 
     private func persistNonSecretConfiguration() {
+        defaults.set(nodeName, forKey: "MacOCRNative.nodeName")
         defaults.set(proxyURL, forKey: "MacOCRNative.proxyURL")
         defaults.set(port, forKey: "MacOCRNative.port")
         defaults.set(operatorLimit, forKey: "MacOCRNative.operatorLimit")
@@ -343,6 +423,11 @@ public final class WorkerController: ObservableObject {
                 guard let self, self.generation == currentGeneration else { return }
                 self.capacity = currentCapacity
                 if self.status == .stopping && currentCapacity.active == 0 { self.finishStopping(); return }
+                if self.status == .error && currentCapacity.active == 0 {
+                    self.outbound?.stop(); self.outbound = nil; self.workerState = nil
+                    self.monitorTask = nil
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 750_000_000)
             }
         }

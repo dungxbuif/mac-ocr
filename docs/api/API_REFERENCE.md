@@ -24,6 +24,14 @@ The complete format is `sk_ocr_` followed by 48 hexadecimal characters. Authenti
 
 The Swagger contract describes the public OCR and MCP data plane. Administrator session and account-management controls are documented here as the private control plane.
 
+## Worker administration and outbound connections
+
+The **Workers** dashboard manages native Mac installations. `GET /v1/admin/workers` returns `nodes`, `routes`, and `authMode`. The listing and `POST /v1/admin/workers/{nodeId}/control` require an administrator session; mutations also require `X-CSRF-Token`. Shared-key builds automatically register using WSS `/v1/workers/connect` with `Authorization: Bearer <shared secret>` and `X-Native-Node-Id`. HTTPS result callbacks and scan output use the same Bearer credential plus event/node identity headers; assignment and attempt checks still apply.
+
+Optional enrollment mode provides `POST /v1/admin/workers/enrollment` for a single-use 15-minute code. The Mac exchanges it at `POST /v1/workers/enroll` for a per-node credential and uses HMAC for native callbacks.
+
+Worker credentials are independent of user OCR API keys. Worker transport does not change the client submission/result API. See [Mac worker setup](../guides/mac-workers.md) and the [plain Markdown protocol](pathname:///worker-protocol.md) for the message contract and network requirements.
+
 ## Input contract
 
 The client does not send a file type. The service determines content type from magic bytes and accepts JPEG, PNG, TIFF, WebP, and PDF.

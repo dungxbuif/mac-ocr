@@ -103,3 +103,21 @@ func TestLoadRejectsDocumentTTLAtOrBelowResultTTL(t *testing.T) {
 		t.Fatal("expected metadata retention to exceed result retention")
 	}
 }
+
+func TestSharedOutboundProductionDoesNotRequireLocalNativeURL(t *testing.T) {
+	setEnv(t, validEnv())
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("NATIVE_TRANSPORT", "websocket")
+	t.Setenv("WORKER_AUTH_MODE", "shared")
+	t.Setenv("NATIVE_BASE_URL", "")
+	t.Setenv("NATIVE_AUTH_SECRET", "shared-worker-key-at-least-32-characters")
+	t.Setenv("NOTIFICATION_ENCRYPTION_KEY", "test-notification-key-at-least-32-characters")
+	cfg, err := config.Load()
+	if err != nil || cfg.NativeTransport != "websocket" {
+		t.Fatalf("shared outbound config: %v", err)
+	}
+	t.Setenv("NATIVE_AUTH_SECRET", "")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("shared outbound mode accepted missing key")
+	}
+}

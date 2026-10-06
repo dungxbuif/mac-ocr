@@ -5,11 +5,13 @@ NATIVE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$NATIVE_DIR/dist/Mac OCR Native.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
-DEFAULT_PROXY_URL="${MACOCR_DEFAULT_PROXY_URL:-${PUBLIC_API_BASE_URL:-http://localhost:8080}}"
-DEFAULT_MODE="${MACOCR_DEFAULT_MODE:-${APP_ENV:-development}}"
+DEFAULT_PROXY_URL="${MACOCR_DEFAULT_PROXY_URL:-${PUBLIC_API_BASE_URL:-https://ocr.dungxbuif.com}}"
+DEFAULT_MODE="${MACOCR_DEFAULT_MODE:-${APP_ENV:-production}}"
 DEFAULT_PORT="${MACOCR_DEFAULT_PORT:-${NATIVE_PORT:-8787}}"
 DEFAULT_LIMIT="${MACOCR_DEFAULT_LIMIT:-${NATIVE_LIMIT:-6}}"
 DEFAULT_AUTH_SECRET="${MACOCR_DEFAULT_AUTH_SECRET:-}"
+DEFAULT_AUTH_MODE="${MACOCR_DEFAULT_AUTH_MODE:-shared}"
+DEFAULT_TRANSPORT="${MACOCR_DEFAULT_TRANSPORT:-websocket}"
 ADAPTIVE_CONCURRENCY="${MACOCR_ADAPTIVE_CONCURRENCY:-true}"
 RESERVE_CORES="${MACOCR_RESERVE_CORES:-2}"
 RESERVE_MEMORY_GB="${MACOCR_RESERVE_MEMORY_GB:-10}"
@@ -19,15 +21,24 @@ PDF_JOB_UNITS="${MACOCR_PDF_JOB_UNITS:-3}"
 CAPACITY_RECOVERY_SAMPLES="${MACOCR_CAPACITY_RECOVERY_SAMPLES:-5}"
 DEFAULT_NODE_ID="${MACOCR_DEFAULT_NODE_ID:-${NATIVE_NODE_ID:-ocr-native-01}}"
 LOG_RETENTION_DAYS="${MACOCR_LOG_RETENTION_DAYS:-30}"
-APP_VERSION="${MACOCR_VERSION:-1.0.3}"
-APP_BUILD_NUMBER="${MACOCR_BUILD_NUMBER:-3}"
+APP_VERSION="${MACOCR_VERSION:-2.0.0}"
+APP_BUILD_NUMBER="${MACOCR_BUILD_NUMBER:-4}"
 
 cd "$NATIVE_DIR"
-swift build -c release
+# Share one bundle across Apple Silicon and Intel Macs by default.
+MACOCR_ARCHS_VALUE="${MACOCR_ARCHS:-arm64 x86_64}"
+read -r -a MACOCR_ARCH_ARRAY <<< "$MACOCR_ARCHS_VALUE"
+MACOCR_BUILD_ARGS=(-c release)
+for MACOCR_ARCH_VALUE in "${MACOCR_ARCH_ARRAY[@]}"; do
+  case "$MACOCR_ARCH_VALUE" in arm64|x86_64) ;; *) echo "Unsupported architecture: $MACOCR_ARCH_VALUE" >&2; exit 1 ;; esac
+  MACOCR_BUILD_ARGS+=(--arch "$MACOCR_ARCH_VALUE")
+done
+swift build "${MACOCR_BUILD_ARGS[@]}"
+MACOCR_BIN_DIR="$(swift build "${MACOCR_BUILD_ARGS[@]}" --show-bin-path)"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR"
-cp ".build/release/mac-ocr-native" "$MACOS_DIR/mac-ocr-native"
+cp "$MACOCR_BIN_DIR/mac-ocr-native" "$MACOS_DIR/mac-ocr-native"
 
 cat >"$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -46,6 +57,8 @@ cat >"$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>MacOCRDefaultAuthMode</key><string></string>
+  <key>MacOCRDefaultTransport</key><string></string>
   <key>MacOCRDefaultProxyURL</key><string></string>
   <key>MacOCRDefaultMode</key><string></string>
   <key>MacOCRDefaultPort</key><string></string>
@@ -64,6 +77,8 @@ cat >"$CONTENTS_DIR/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+plutil -replace MacOCRDefaultAuthMode -string "$DEFAULT_AUTH_MODE" "$CONTENTS_DIR/Info.plist"
+plutil -replace MacOCRDefaultTransport -string "$DEFAULT_TRANSPORT" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRDefaultProxyURL -string "$DEFAULT_PROXY_URL" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRDefaultMode -string "$DEFAULT_MODE" "$CONTENTS_DIR/Info.plist"
 plutil -replace MacOCRDefaultPort -string "$DEFAULT_PORT" "$CONTENTS_DIR/Info.plist"

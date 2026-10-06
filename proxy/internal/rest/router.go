@@ -31,6 +31,7 @@ func NewRouter(
 	webhook *WebhookHandler,
 	notifications *NotificationHandler,
 	mcp *MCPHandler,
+	workers ...*WorkersHandler,
 ) *Router {
 	gin.SetMode(gin.ReleaseMode)
 	gin.EnableJsonDecoderDisallowUnknownFields()
@@ -72,6 +73,14 @@ func NewRouter(
 
 	adminGrp := api.Group("/admin", adminAuth.RequireAdminSession())
 	adminGrp.GET("/dashboard", adminAuth.DashboardStats)
+	if len(workers) > 0 && workers[0] != nil {
+		h := workers[0]
+		api.POST("/workers/enroll", h.Enroll)
+		api.GET("/workers/connect", h.Connect)
+		adminGrp.POST("/workers/enrollment", h.CreateEnrollment)
+		adminGrp.GET("/workers", h.List)
+		adminGrp.POST("/workers/:nodeId/control", h.Control)
+	}
 	adminGrp.GET("/documents", func(c *gin.Context) {
 		docList, err := doc.svc.ListDocumentsAdmin(c.Request.Context(), "", 100, 0)
 		if err != nil {

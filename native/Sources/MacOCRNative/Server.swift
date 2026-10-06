@@ -14,6 +14,7 @@ public actor NativeWorkerState {
     public let nodeId: String
     public let bootId: String
     public let authSecret: String
+    public let bearerCallbacks: Bool
     public let session: URLSession
     private let logger: NativeLogHandler
     private let adaptivePolicy: NativeAdaptiveConcurrencyPolicy
@@ -29,6 +30,7 @@ public actor NativeWorkerState {
         operatorLimit: Int,
         authSecret: String,
         nodeId: String,
+        bearerCallbacks: Bool = false,
         adaptivePolicy: NativeAdaptiveConcurrencyPolicy = .configured(),
         resourceProbe: any NativeResourceProbing = NativeSystemResourceProbe(),
         logger: @escaping NativeLogHandler = { _, _ in }
@@ -39,6 +41,7 @@ public actor NativeWorkerState {
         self.nodeId = nodeId
         self.bootId = "boot_\(UInt64(Date().timeIntervalSince1970 * 1000))"
         self.authSecret = authSecret
+        self.bearerCallbacks = bearerCallbacks
         self.logger = logger
         self.adaptivePolicy = adaptivePolicy
         self.resourceProbe = resourceProbe
@@ -53,7 +56,7 @@ public actor NativeWorkerState {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 60
-        self.session = URLSession(configuration: config)
+        self.session = URLSession(configuration: config, delegate: CredentialRedirectDelegate(), delegateQueue: nil)
     }
 
     public func tryAcquireSlot(attemptID: String, mediaType: String?) -> (accepted: Bool, capacity: NativeCapacity) {
@@ -308,7 +311,8 @@ public actor NativeWorkerState {
         req.setValue(nodeId, forHTTPHeaderField: "X-Native-Node-Id")
         req.setValue(timestamp, forHTTPHeaderField: "X-Native-Timestamp")
         req.setValue(eventID, forHTTPHeaderField: "X-Native-Event-Id")
-        req.setValue(signature, forHTTPHeaderField: "X-Native-Signature")
+        if bearerCallbacks { req.setValue("Bearer \(authSecret)", forHTTPHeaderField: "Authorization") }
+        else { req.setValue(signature, forHTTPHeaderField: "X-Native-Signature") }
         req.httpBody = data
         let (_, response) = try await session.data(for: req)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
@@ -344,7 +348,8 @@ public actor NativeWorkerState {
             req.setValue(nodeId, forHTTPHeaderField: "X-Native-Node-Id")
             req.setValue(timestamp, forHTTPHeaderField: "X-Native-Timestamp")
             req.setValue(event.eventId, forHTTPHeaderField: "X-Native-Event-Id")
-            req.setValue(signature, forHTTPHeaderField: "X-Native-Signature")
+            if bearerCallbacks { req.setValue("Bearer \(authSecret)", forHTTPHeaderField: "Authorization") }
+        else { req.setValue(signature, forHTTPHeaderField: "X-Native-Signature") }
             req.httpBody = bodyData
 
             do {
@@ -715,7 +720,7 @@ private func validateScanJSON(_ body: Data) -> Bool {
     return true
 }
 
-private func validOCRRequest(_ request: NativeOCRRequest) -> Bool {
+func validOCRRequest(_ request: NativeOCRRequest) -> Bool {
     let identifierCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
     func validIdentifier(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 128 && value.unicodeScalars.allSatisfy { identifierCharacters.contains($0) }
@@ -741,7 +746,7 @@ private func validOCRRequest(_ request: NativeOCRRequest) -> Bool {
     return true
 }
 
-private func validScanRequest(_ request: NativeScanRequest) -> Bool {
+func validScanRequest(_ request: NativeScanRequest) -> Bool {
     let identifierCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
     func validIdentifier(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 128 && value.unicodeScalars.allSatisfy { identifierCharacters.contains($0) }

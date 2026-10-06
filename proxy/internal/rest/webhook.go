@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +31,7 @@ type WebhookHandler struct {
 	notifier   domain.NotificationPublisher
 	results    domain.ResultCache
 	resultTTL  time.Duration
+	workers    *native.WorkerHub
 }
 
 // HandleNativeScanOutput stores the binary scan before its small completion
@@ -55,7 +57,8 @@ func (h *WebhookHandler) HandleNativeScanOutput(c *gin.Context) {
 		RespondProblem(c, errs.InvalidInput("scan output is empty"))
 		return
 	}
-	if h.authSecret == "" || native.VerifyWebhook(h.authSecret, nodeID, ts, eventID, body, sig) != nil {
+	secret, secretErr := h.nativeSecret(c, nodeID)
+	if secretErr != nil || secret == "" || !h.nativePayloadAuthorized(c, secret, nodeID, ts, eventID, body, sig) {
 		RespondProblem(c, errs.Unauthorized("invalid native scan output signature"))
 		return
 	}
@@ -66,6 +69,9 @@ func (h *WebhookHandler) HandleNativeScanOutput(c *gin.Context) {
 	}
 	if doc.Status != domain.StatusProcessing || doc.AttemptID != attemptID || doc.Options == nil || doc.Options.ProcessingMode != "scan" {
 		RespondProblem(c, errs.New(errs.CodeStateConflict, http.StatusConflict, "Scan output does not match the active scan attempt"))
+		return
+	}
+	if !h.assignedWorker(c, scanID, attemptID, nodeID) {
 		return
 	}
 	key := scanOutputKey(doc, attemptID)
@@ -120,12 +126,17 @@ func (h *WebhookHandler) HandleNativeVerify(c *gin.Context) {
 		RespondProblem(c, errs.InvalidInput("failed to read verification body"))
 		return
 	}
-	if h.authSecret == "" {
+	secret, secretErr := h.nativeSecret(c, nodeID)
+	if secretErr != nil {
+		RespondProblem(c, errs.Unauthorized("invalid worker credential"))
+		return
+	}
+	if secret == "" {
 		RespondProblem(c, errs.ServiceUnavailable("native authentication is not configured", nil))
 		return
 	}
-	if err := native.VerifyWebhook(h.authSecret, nodeID, ts, eventID, body, sig); err != nil {
-		h.logger.Warn("native connection verification failed", "error", err, "nodeID", nodeID)
+	if !h.nativePayloadAuthorized(c, secret, nodeID, ts, eventID, body, sig) {
+		h.logger.Warn("native connection verification failed", "nodeID", nodeID)
 		RespondProblem(c, errs.Unauthorized("native shared key verification failed"))
 		return
 	}
@@ -167,9 +178,14 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 		return
 	}
 
-	if h.authSecret != "" {
-		if err := native.VerifyWebhook(h.authSecret, nodeID, ts, eventID, body, sig); err != nil {
-			h.logger.Warn("webhook signature verification failed", "error", err, "nodeID", nodeID)
+	secret, secretErr := h.nativeSecret(c, nodeID)
+	if secretErr != nil {
+		RespondProblem(c, errs.Unauthorized("invalid worker credential"))
+		return
+	}
+	if secret != "" {
+		if !h.nativePayloadAuthorized(c, secret, nodeID, ts, eventID, body, sig) {
+			h.logger.Warn("webhook signature verification failed", "nodeID", nodeID)
 			RespondProblem(c, errs.Unauthorized("invalid webhook signature"))
 			return
 		}
@@ -202,6 +218,9 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 		RespondProblem(c, errs.NotFound("document not found"))
 		return
 	}
+	if !h.assignedWorker(c, event.DocumentID, event.AttemptID, nodeID) {
+		return
+	}
 	if (event.Type == "scan.completed" || event.Type == "scan.failed") && (doc.Options == nil || doc.Options.ProcessingMode != "scan") {
 		RespondProblem(c, errs.New(errs.CodeStateConflict, http.StatusConflict, "Callback does not match a scan job"))
 		return
@@ -218,6 +237,9 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 					return
 				}
 			}
+		}
+		if h.workers != nil {
+			h.workers.Complete(event.AttemptID)
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "acknowledged", "eventId": event.EventID, "documentId": event.DocumentID})
 		return
@@ -305,6 +327,9 @@ func (h *WebhookHandler) HandleNativeEvent(c *gin.Context) {
 		}
 	}
 
+	if h.workers != nil {
+		h.workers.Complete(event.AttemptID)
+	}
 	if h.sched != nil {
 		h.sched.Wake()
 	}
@@ -336,4 +361,32 @@ func (h *WebhookHandler) buildNotificationEvent(doc *domain.Document) (*domain.N
 		return nil, nil
 	}
 	return h.notifier.BuildDocumentEvent(doc)
+}
+
+// Use per-node credentials exclusively when outbound mode is enabled.
+func (h *WebhookHandler) SetWorkerHub(hub *native.WorkerHub) { h.workers = hub }
+func (h *WebhookHandler) nativeSecret(c *gin.Context, nodeID string) (string, error) {
+	if h.workers != nil {
+		return h.workers.ResolveSecret(c.Request.Context(), nodeID)
+	}
+	return h.authSecret, nil
+}
+func (h *WebhookHandler) assignedWorker(c *gin.Context, docID, attemptID, nodeID string) bool {
+	if h.workers == nil {
+		return true
+	}
+	assigned, err := h.workers.AssignedNode(c.Request.Context(), docID, attemptID)
+	if err != nil || assigned != nodeID {
+		RespondProblem(c, errs.New(errs.CodeStateConflict, http.StatusConflict, "Callback worker does not own this attempt"))
+		return false
+	}
+	return true
+}
+
+func (h *WebhookHandler) nativePayloadAuthorized(c *gin.Context, secret, nodeID, ts, eventID string, body []byte, sig string) bool {
+	if h.workers != nil && h.workers.SharedMode() {
+		authorization := c.GetHeader("Authorization")
+		return strings.HasPrefix(authorization, "Bearer ") && h.workers.AuthorizeBearer(c.Request.Context(), nodeID, strings.TrimPrefix(authorization, "Bearer "))
+	}
+	return native.VerifyWebhook(secret, nodeID, ts, eventID, body, sig) == nil
 }

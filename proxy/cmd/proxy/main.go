@@ -88,10 +88,26 @@ func main() {
 	go notificationSvc.Run(ctx)
 	go retention.New(docRepo, notificationRepo, objRepo, logger, cfg.InputTTL, cfg.UploadTTL, cfg.DocumentTTL, cfg.NotificationTTL, configRepo).Run(ctx)
 
-	nativeClient := native.NewClient(cfg.NativeBaseURL, cfg.NativeAuthSecret)
+	var nativeClient native.Transport = native.NewClient(cfg.NativeBaseURL, cfg.NativeAuthSecret)
+	var workerHub *native.WorkerHub
+	var workersHandler *rest.WorkersHandler
+	if cfg.NativeTransport == "websocket" {
+		workerRepo := pgrepo.NewWorkerRepository(pgRepo.Pool(), secretCipher)
+		workerHub = native.NewWorkerHub(workerRepo)
+		if cfg.WorkerAuthMode == "shared" {
+			workerHub.SetSharedSecret(cfg.NativeAuthSecret)
+		}
+		nativeClient = workerHub
+		workersHandler = rest.NewWorkersHandler(workerHub, workerRepo)
+		defer workerHub.Close()
+	}
 	callbackURL := fmt.Sprintf("%s/webhooks/native/events", cfg.PublicAPIBaseURL)
 
 	sched := scheduler.New(docRepo, objRepo, nativeClient, authSvc, callbackURL, logger, cfg.ProcessingLease, cfg.ProcessingMaxAttempts, notificationSvc)
+	if workerHub != nil {
+		workerHub.SetLease(cfg.ProcessingLease)
+		workerHub.SetWake(sched.Wake)
+	}
 	go sched.Run(ctx)
 
 	sessionMgr := rest.NewSessionManager(redisRepo)
@@ -105,6 +121,9 @@ func main() {
 	uploadHandler := rest.NewUploadHandlerWithReservationTTL(objRepo, cfg.MaxUploadBytes, configRepo, cfg.UploadTTL, authSvc)
 	capHandler := rest.NewCapabilitiesHandler()
 	webhookHandler := rest.NewWebhookHandler(docRepo, objRepo, cfg.NativeAuthSecret, sched, logger, notificationSvc, redisRepo, cfg.ResultTTL)
+	if workerHub != nil {
+		webhookHandler.SetWorkerHub(workerHub)
+	}
 	notificationHandler := rest.NewNotificationHandler(notificationSvc)
 	mcpHandler := rest.NewMCPHandler(docSvc, notificationSvc, cfg.PublicAPIBaseURL)
 
@@ -121,6 +140,7 @@ func main() {
 		webhookHandler,
 		notificationHandler,
 		mcpHandler,
+		workersHandler,
 	)
 
 	logger.Info("proxy server starting", "addr", cfg.HTTPAddr, "env", cfg.Env)

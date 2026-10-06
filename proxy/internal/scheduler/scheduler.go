@@ -14,7 +14,7 @@ import (
 type Scheduler struct {
 	docs        domain.DocumentRepository
 	objects     domain.ObjectRepository
-	native      *native.Client
+	native      native.Transport
 	auth        *auth.Service
 	callbackURL string
 	logger      *slog.Logger
@@ -24,6 +24,9 @@ type Scheduler struct {
 	wakeCh      chan struct{}
 }
 
+type workerCapacityClaimer interface {
+	ClaimNextForWorker(ctx context.Context, attemptID string, lease time.Duration, maxAttempts, availableUnits, imageJobUnits, pdfJobUnits int, ocr, scan bool) (*domain.Document, error)
+}
 type weightedCapacityClaimer interface {
 	ClaimNextWithinCapacity(ctx context.Context, attemptID string, lease time.Duration, maxAttempts, availableUnits, imageJobUnits, pdfJobUnits int) (*domain.Document, error)
 }
@@ -31,7 +34,7 @@ type weightedCapacityClaimer interface {
 func New(
 	docs domain.DocumentRepository,
 	objects domain.ObjectRepository,
-	native *native.Client,
+	native native.Transport,
 	auth *auth.Service,
 	callbackURL string,
 	logger *slog.Logger,
@@ -82,7 +85,21 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 	s.failExhaustedAttempts(ctx)
-	capacity, err := s.native.GetCapacity(ctx)
+	transport := s.native
+	var release func()
+	var capacity *domain.NativeCapacity
+	var err error
+	if provider, ok := s.native.(native.ReservationProvider); ok {
+		transport, capacity, release, err = provider.Reserve(ctx)
+	} else {
+		capacity, err = s.native.GetCapacity(ctx)
+	}
+	reserved := release != nil
+	defer func() {
+		if reserved && release != nil {
+			release()
+		}
+	}()
 	if err != nil {
 		s.logger.Warn("native capacity unavailable; delaying queue claim", "error", err)
 		return
@@ -92,7 +109,10 @@ func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 	}
 	attemptID := fmt.Sprintf("att_%x", time.Now().UnixNano())
 	var doc *domain.Document
-	if claimer, ok := s.docs.(weightedCapacityClaimer); ok && capacity.AvailableUnits > 0 && capacity.ImageJobUnits > 0 && capacity.PDFJobUnits > 0 {
+	capabilities, hasCapabilities := transport.(native.CapabilityTransport)
+	if claimer, ok := s.docs.(workerCapacityClaimer); ok && hasCapabilities {
+		doc, err = claimer.ClaimNextForWorker(ctx, attemptID, s.lease, s.maxAttempts, capacity.AvailableUnits, capacity.ImageJobUnits, capacity.PDFJobUnits, capabilities.Supports("ocr"), capabilities.Supports("scan"))
+	} else if claimer, ok := s.docs.(weightedCapacityClaimer); ok && capacity.AvailableUnits > 0 && capacity.ImageJobUnits > 0 && capacity.PDFJobUnits > 0 {
 		doc, err = claimer.ClaimNextWithinCapacity(ctx, attemptID, s.lease, s.maxAttempts, capacity.AvailableUnits, capacity.ImageJobUnits, capacity.PDFJobUnits)
 	} else {
 		doc, err = s.docs.ClaimNext(ctx, attemptID, s.lease, s.maxAttempts)
@@ -123,7 +143,8 @@ func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 			},
 			Callback: domain.NativeCallbackRef{URL: s.callbackURL},
 		}
-		err = s.native.DispatchScan(ctx, scanReq)
+		reserved = false
+		err = transport.DispatchScan(ctx, scanReq)
 	} else {
 		req := &domain.NativeOCRRequest{
 			DocumentID: doc.ID,
@@ -139,7 +160,8 @@ func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 				URL: s.callbackURL,
 			},
 		}
-		err = s.native.DispatchOCR(ctx, req)
+		reserved = false
+		err = transport.DispatchOCR(ctx, req)
 	}
 	if err != nil {
 		if err == native.ErrNativeBusy {

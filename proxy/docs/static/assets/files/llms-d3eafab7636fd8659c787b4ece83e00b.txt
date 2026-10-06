@@ -1,0 +1,11 @@
+# OCR Platform
+
+Production REST/MCP OCR service with native Mac workers.
+
+## References
+- [Worker protocol](https://ocr.dungxbuif.com/worker-protocol.md): enrollment, WSS messages, routing, deployment requirements.
+- [OpenAPI](https://ocr.dungxbuif.com/api/v1/openapi.json): public OCR API contract.
+- [Mac worker setup](https://ocr.dungxbuif.com/guides/mac-workers): manual app installation and node administration.
+- [API guide](https://ocr.dungxbuif.com/api/API_REFERENCE): authentication, submission, result retrieval and limits.
+
+Never include node credentials, enrollment codes, user API keys, or document contents in logs or prompts.

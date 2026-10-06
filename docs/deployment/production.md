@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # Production deployment
 
-This is a release checklist, not a provider-specific infrastructure template. The OCR worker requires macOS; deploy the Go proxy and its stateful dependencies according to your platform, then provide routable private connectivity to the native worker.
+This is a release checklist, not a provider-specific infrastructure template. The OCR worker requires macOS. With `NATIVE_TRANSPORT=websocket`, each Mac connects outbound to the Go proxy's public HTTPS endpoint. Legacy `NATIVE_TRANSPORT=http` instead requires routable connectivity from the proxy to a native HTTP listener.
 
 ## Required topology
 
@@ -23,6 +23,8 @@ Go proxy ── PostgreSQL
 ```
 
 Run one scheduler-capable proxy replica first. Multi-replica queue claiming is supported by PostgreSQL row locking, but rollout and capacity should still be load-tested with the intended database and worker concurrency.
+
+Outbound WebSocket mode supports one proxy replica initially: sockets are owned by that process. PostgreSQL queue locking alone does not make live socket dispatch work across multiple proxy replicas. Configure ingress to support WebSocket upgrade and long-lived connections. With `WORKER_AUTH_MODE=shared`, configure `NATIVE_AUTH_SECRET` privately and build the app with the same key; each Mac registers automatically. Optional `WORKER_AUTH_MODE=enrollment` uses **Workers** enrollment codes instead. No Mac tunnel or inbound/local OCR port is needed. Mac input/output HTTPS endpoints must also be reachable.
 
 ## Build artifacts
 
@@ -50,7 +52,9 @@ swift build -c release
 
 Build web assets before the Go binary because both are embedded at compile time.
 
-For the menu-bar app bundle, pass the production connection defaults to `native/scripts/build-app.sh` (for example `MACOCR_DEFAULT_PROXY_URL=https://ocr.dungxbuif.com`, `MACOCR_DEFAULT_MODE=production`, `MACOCR_DEFAULT_AUTH_SECRET=<shared NATIVE_AUTH_SECRET>`). A previous dev build that saved `http://localhost:8080` in UserDefaults or an old connection key in Keychain keeps those values after installing the production bundle, because saved settings override the bundle defaults on launch. Clear the saved state before relaunching so the production bundle reseed from `Info.plist`:
+For a manually shared outbound app, build with `MACOCR_DEFAULT_PROXY_URL=https://ocr.dungxbuif.com`, `MACOCR_DEFAULT_MODE=production`, and `MACOCR_DEFAULT_AUTH_MODE=shared`. Inject `MACOCR_DEFAULT_AUTH_SECRET` privately from the server's `NATIVE_AUTH_SECRET`; never commit the value or generated private app artifacts. In optional enrollment mode, omit the bundled secret and use Keychain credentials. The build uses ad-hoc signing; no App Store submission, Developer ID, or notarization workflow is required by this manual release process.
+
+For legacy HTTP rollback builds only, the native shared key is configured separately. A previous dev build may retain saved connection settings after an upgrade. Clear saved state only when intentionally reconfiguring that installation:
 
 ```bash
 defaults delete com.macocr.native
@@ -78,7 +82,7 @@ docker build \
 - PostgreSQL with automated backups, point-in-time recovery, TLS, and capacity for queue locks and document retention.
 - Redis with authentication, TLS, memory policy compatible with result TTLs, and monitoring for eviction pressure.
 - A private S3 bucket with encryption at rest, blocked public access, lifecycle cleanup, CORS restricted to intended upload origins, and enforced SigV4 signed headers.
-- A macOS worker host with the release binary supervised by a service manager and reachable only from the proxy network.
+- A macOS worker app able to reach the production WSS endpoint and HTTPS input/output URLs; legacy HTTP mode instead needs a private native listener reachable from the proxy.
 - HTTPS ingress with request timeouts that permit SSE and MCP streams.
 - Centralized logs and alerts for readiness failures, queue growth, callback signature errors, notification retries, and retention failures.
 

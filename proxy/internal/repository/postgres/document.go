@@ -474,6 +474,37 @@ func (r *DocumentRepository) ClaimNextWithinCapacity(ctx context.Context, attemp
 	return r.GetByID(ctx, id)
 }
 
+// ClaimNextForWorker filters queue rows by advertised capability before claiming.
+func (r *DocumentRepository) ClaimNextForWorker(ctx context.Context, attemptID string, lease time.Duration, maxAttempts, availableUnits, imageJobUnits, pdfJobUnits int, ocr, scan bool) (*domain.Document, error) {
+	if attemptID == "" || lease <= 0 || maxAttempts <= 0 || availableUnits <= 0 || imageJobUnits <= 0 || pdfJobUnits <= 0 {
+		return nil, domain.ErrBadParamInput
+	}
+	var id string
+	err := r.pool.QueryRow(ctx,
+		`UPDATE documents
+		 SET status = 'processing', attempt_id=$1, attempt_count=attempt_count+1,
+		     processing_until=$2, error_detail=NULL, updated_at=now()
+		 WHERE id = (
+		     SELECT id FROM documents
+		     WHERE (status = 'queued'
+		        OR (status='processing' AND processing_until <= now() AND attempt_count < $3::int))
+		       AND CASE WHEN options_json->>'processingMode'='scan' THEN $8::boolean ELSE $7::boolean END
+		       AND CASE WHEN input_content_type='application/pdf' THEN $6::int ELSE $5::int END <= $4::int
+		     ORDER BY CASE WHEN status='queued' THEN 0 ELSE 1 END, created_at ASC
+		     FOR UPDATE SKIP LOCKED
+		     LIMIT 1
+		 )
+		 RETURNING id`, attemptID, time.Now().Add(lease), maxAttempts, availableUnits, imageJobUnits, pdfJobUnits, ocr, scan,
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim next capacity-eligible document: %w", err)
+	}
+	return r.GetByID(ctx, id)
+}
+
 func (r *DocumentRepository) RequeueAttempt(ctx context.Context, id, attemptID string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE documents SET status='queued', attempt_id=NULL, processing_until=NULL, updated_at=now()
 		WHERE id=$1 AND status='processing' AND attempt_id=$2`, id, attemptID)

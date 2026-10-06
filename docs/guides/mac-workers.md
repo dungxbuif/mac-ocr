@@ -1,0 +1,42 @@
+---
+title: Connect Mac workers
+sidebar_position: 3
+---
+
+# Connect Mac workers
+
+Install Mac OCR Native on each Mac you want to contribute OCR capacity. Each app connects outbound to your production server over secure WebSocket. Macs may be on different networks; no incoming Mac port, VPN, or separate OCR tunnel service is required in outbound mode.
+
+## Add a Mac
+
+1. Share the production app ZIP or DMG manually. Extract it and place **Mac OCR Native.app** in Applications.
+2. Open the app. The shared-key build already contains the production URL and connection key, so it connects automatically.
+3. Sign in to the administration dashboard and open **Workers** to confirm the Mac's connection and capacity.
+
+The app derives a stable node identity from a hash of the Mac's hardware identity, with a saved random fallback if the hardware identity is unavailable. The raw hardware identifier is not sent to the server. All shared-key builds use the same production credential over HTTPS/WSS. Treat the distributed app as a private artifact; rotating this key requires updating the server and all copies of the app. If an ad-hoc build is blocked on first opening, use Finder's Open action and the macOS Privacy & Security approval for that app; do not disable Gatekeeper globally. App Store submission is not part of this distribution flow.
+
+Optional enrollment mode is available for administrators who want separate node credentials. In that mode, create a single-use 15-minute code from **Add Mac**, paste it into the app, and enroll each installation separately. The node's credential is stored in Keychain.
+
+## Understand status and routing
+
+A connected node may still have zero capacity because it is paused, draining, or its CPU/memory reserve leaves no space for another job. The scheduler considers node capabilities and the weighted cost of images and PDFs before assigning work.
+
+The Workers page shows node identity, connection state, last heartbeat, app version, resource capacity, and recent routing assignments. Use **Pause** to stop new work, **Resume** to permit new work again, **Drain** before stopping a Mac, and **Revoke** to block a registered node identity. In shared-key mode, revoking one identity does not rotate the common key.
+
+On a network interruption or sleep, a node becomes unavailable for new work. Active attempts follow the server's lease and retry policy. The app reconnects after the network returns. A late result cannot overwrite a different active attempt.
+
+## Network requirements
+
+- Outbound HTTPS/WSS to the production domain, normally port 443.
+- HTTPS access to the job's input and result storage endpoints.
+- A supported macOS version and enough resources for the installed OCR engine.
+
+The existing Swift package requires macOS 13 or newer. A build supports its packaged CPU architecture; verify the release's architecture before distributing to Intel Macs. A Mac must remain awake to contribute capacity.
+
+## Upgrade from the old OCR tunnel
+
+Switch the server to WebSocket worker transport only after the upgraded app and server have passed a synthetic job check. In the new mode the Mac app calls the OCR engine directly and opens no local OCR HTTP listener. Existing client REST/MCP submission behavior remains the same.
+
+Remove the OCR mapping from the old tunnel after cutover. If `mac-service-tunnel` also serves LM Studio, keep the LLM mapping; stopping the entire container would interrupt that service.
+
+For machine-readable connection and administration details, see [worker protocol Markdown](pathname:///worker-protocol.md) and [the agent entry point](/llms.txt).

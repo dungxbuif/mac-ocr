@@ -439,3 +439,11 @@ h1 {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
   z-index: 200;
 }
+.worker-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.worker-guide { padding: 20px 28px; margin-bottom: 24px; }
+.worker-guide p { line-height: 1.6; }
+.worker-guide small, .worker-id { color: var(--text-dim); }
+.worker-id { font-size: 11px; overflow-wrap: anywhere; margin-top: 5px; }
+.worker-error { background: #fff1f2; color: #9f1239; padding: 14px; border-radius: 8px; margin-bottom: 20px; }
+.worker-routes { margin-top: 24px; }
+.worker-code { display: block; overflow-wrap: anywhere; user-select: all; padding: 16px; background: #f1f5f9; border-radius: 8px; margin: 20px 0; }

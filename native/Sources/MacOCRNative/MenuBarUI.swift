@@ -78,11 +78,13 @@ public struct ControlPanelView: View {
                 }
 
                 HStack(spacing: 10) {
+                    if !controller.usesOutbound {
                     Stepper(value: Binding(get: { controller.port }, set: { controller.updatePort($0) }), in: 1...65_535) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("Local port").font(.caption2).foregroundStyle(.secondary)
                             Text("\(controller.port)").fontDesign(.monospaced)
                         }
+                    }
                     }
                     Stepper(value: Binding(get: { controller.operatorLimit }, set: { controller.updateOperatorLimit($0) }), in: 0...256) {
                         VStack(alignment: .leading, spacing: 1) {
@@ -94,6 +96,16 @@ public struct ControlPanelView: View {
                 .disabled(controller.configurationLocked)
 
                 VStack(alignment: .leading, spacing: 4) {
+                    if controller.usesOutbound {
+                        TextField("Node name", text: $controller.nodeName).textFieldStyle(.roundedBorder)
+                        if !controller.usesSharedAuth {
+                        SecureField("Enrollment code from dashboard", text: $controller.enrollmentToken).textFieldStyle(.roundedBorder)
+                        Button("Enroll and connect") { controller.enroll() }.disabled(controller.configurationLocked || controller.connectionStatus == .testing)
+                        } else {
+                            Text("Shared production key · automatic machine identity").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Text(controller.usesSharedAuth ? "Shared release automatically connects to production" : "Identity and key stay on this Mac in Keychain").font(.caption2).foregroundStyle(.secondary)
+                    } else {
                     Text("Connection key (HMAC)").font(.caption2).foregroundStyle(.secondary)
                     SecureField("Enter connection key", text: Binding(get: { controller.authSecret }, set: { controller.updateAuthSecret($0) }))
                         .textFieldStyle(.roundedBorder)
@@ -103,6 +115,7 @@ public struct ControlPanelView: View {
                         .foregroundStyle(.tertiary)
                 }
 
+                }
                 HStack {
                     Button { controller.testConnection() } label: {
                         if controller.connectionStatus == .testing {
@@ -302,6 +315,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         controller.requestQuit = { [weak self] in self?.confirmQuit() }
         controller.$status.sink { [weak self] status in self?.updateStatusIcon(status) }.store(in: &cancellables)
         controller.startOffline()
+        controller.autoConnect()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.showPopover() }
     }
 

@@ -136,6 +136,20 @@ UPDATE account_configs AS cfg SET
         WHERE r.user_id = cfg.user_id AND r.state = 'reserved'
     ), 0);
 
+CREATE TABLE IF NOT EXISTS native_workers (
+ node_id TEXT PRIMARY KEY, name TEXT NOT NULL, secret BYTEA NOT NULL,
+ revoked BOOLEAN NOT NULL DEFAULT false, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS native_enrollments (
+ token_hash TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS native_worker_routes (
+ attempt_id TEXT PRIMARY KEY, node_id TEXT NOT NULL REFERENCES native_workers(node_id),
+ document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL CHECK (kind IN ('ocr','scan')), created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_native_routes_document ON native_worker_routes(document_id);
+
 CREATE TABLE IF NOT EXISTS notification_events (
     id                    TEXT PRIMARY KEY,
     user_id               BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

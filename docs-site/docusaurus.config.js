@@ -23,6 +23,7 @@ export default {
             "configuration/**",
             "deployment/**",
             "planning/**",
+            "superpowers/**",
             "testing/**",
             "guides/local-development.md",
           ],

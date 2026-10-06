@@ -23,6 +23,7 @@ import {
   Infinity as InfinityIcon
 } from "lucide-react";
 import "./styles.css";
+import { WorkersPage } from "./WorkersPage";
 
 interface UserConfig {
   rate_limit_rpm?: number;
@@ -63,7 +64,7 @@ function formatBytes(bytes?: number): string {
 }
 
 function formatDate(iso?: string): string {
-  if (!iso) return "—";
+  if (!iso || !Number.isFinite(new Date(iso).getTime())) return "—";
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "2-digit",
@@ -89,7 +90,7 @@ function App() {
   const [session, setSession] = useState<{ loading: boolean; user: User | null }>({ loading: true, user: null });
   const [csrf, setCsrf] = useState(() => getCookie("macocr_csrf"));
   const [toast, setToast] = useState("");
-  const [adminView, setAdminView] = useState<"users" | "keys">("users");
+  const [adminView, setAdminView] = useState<"users" | "keys" | "workers">("users");
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -180,6 +181,9 @@ function App() {
                 <UsersIcon size={16} />
                 <span>User Accounts & Quotas</span>
               </button>
+              <button type="button" className={`nav-link nav-button ${adminView === "workers" ? "active" : ""}`} onClick={() => setAdminView("workers")}>
+                <Activity size={16} /><span>Mac Workers & Routing</span>
+              </button>
               <button
                 type="button"
                 className={`nav-link nav-button ${adminView === "keys" ? "active" : ""}`}
@@ -216,7 +220,7 @@ function App() {
       </aside>
 
       <main className="workspace">
-        {isAdmin && adminView === "users" ? (
+        {isAdmin && adminView === "workers" ? <WorkersPage api={api} /> : isAdmin && adminView === "users" ? (
           <AdminUsersListPage
             api={api}
             notify={notify}

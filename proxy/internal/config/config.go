@@ -28,6 +28,8 @@ type Config struct {
 	PublicAPIBaseURL  string `env:"PUBLIC_API_BASE_URL,required"  validate:"required,uri"`
 	PublicDocsBaseURL string `env:"PUBLIC_DOCS_BASE_URL,required" validate:"required,uri"`
 
+	WorkerAuthMode            string        `env:"WORKER_AUTH_MODE" envDefault:"enrollment" validate:"oneof=enrollment shared"`
+	NativeTransport           string        `env:"NATIVE_TRANSPORT" envDefault:"http" validate:"oneof=http websocket"`
 	NativeBaseURL             string        `env:"NATIVE_BASE_URL"`
 	NativeAuthSecret          string        `env:"NATIVE_AUTH_SECRET"`
 	NotificationEncryptionKey string        `env:"NOTIFICATION_ENCRYPTION_KEY" envDefault:"local-notification-key-change-me"`
@@ -57,11 +59,14 @@ func Load() (*Config, error) {
 	if err := validate.Struct(cfg); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
+	if cfg.NativeTransport == "websocket" && cfg.WorkerAuthMode == "shared" && len(cfg.NativeAuthSecret) < 32 {
+		return nil, fmt.Errorf("NATIVE_AUTH_SECRET must be at least 32 characters in shared worker mode")
+	}
 	if cfg.DocumentTTL <= cfg.ResultTTL {
 		return nil, fmt.Errorf("DOCUMENT_TTL must be greater than RESULT_TTL so expired results remain traceable before metadata deletion")
 	}
 	if cfg.Env == "production" {
-		if cfg.NativeBaseURL == "" || cfg.NativeAuthSecret == "" {
+		if cfg.NativeTransport == "http" && (cfg.NativeBaseURL == "" || cfg.NativeAuthSecret == "") {
 			return nil, fmt.Errorf("NATIVE_BASE_URL and NATIVE_AUTH_SECRET are required in production")
 		}
 		if cfg.NotificationEncryptionKey == developmentNotificationKey || len(cfg.NotificationEncryptionKey) < 32 {
