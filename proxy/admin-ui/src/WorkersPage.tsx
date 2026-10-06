@@ -6,11 +6,14 @@ interface Capacity {
   active?: number; available?: number; effectiveLimit?: number; operatorLimit?: number;
   activeUnits?: number; availableUnits?: number; resourceReason?: string; reason?: string;
 }
+interface MachineMetadata { model?: string; user?: string; hostname?: string; os?: string; architecture?: string; cpuCores?: number; memoryBytes?: number }
 interface Worker {
   nodeId: string; name?: string; version?: string; state?: string; connected: boolean;
-  paused?: boolean; revoked?: boolean; lastSeen?: string; capacity?: Capacity; capabilities?: string[];
+  metadata?: MachineMetadata; paused?: boolean; revoked?: boolean; lastSeen?: string; capacity?: Capacity; capabilities?: string[];
 }
 interface Route { nodeId: string; documentId: string; attemptId: string; kind: string; status: string; createdAt: string }
+const memory = (bytes?: number) => typeof bytes === "number" && Number.isFinite(bytes) && bytes > 0 ? `${(bytes / (1024 ** 3)).toFixed(1)} GB` : "Unknown";
+const detail = (value?: string) => value?.trim() || "Unknown";
 const date = (value?: string) => value && Number.isFinite(new Date(value).getTime()) ? new Date(value).toLocaleString() : "—";
 
 async function read(response: Response) {
@@ -80,9 +83,14 @@ export function WorkersPage({ api }: { api: Api }) {
       <small>Pause stops new assignments. Drain stops new assignments and lets current work finish; select Resume when the Mac is ready again. {authMode === "shared" ? "Revoke blocks this node identity; it does not rotate the shared key." : "Revoke removes the Mac’s access."}</small></div>
     {error && <div className="worker-error" role="alert">{error} Existing results may be out of date.</div>}
     <div className="panel"><div className="panel-header"><strong>{nodes.filter(n => n.connected && !n.revoked).length} connected · {nodes.length} registered</strong><span>Updates every 5 seconds · Last update {date(updated)}</span></div>
-      <div className="table-responsive"><table className="data-table"><thead><tr><th>Mac</th><th>Connection / state</th><th>Capacity</th><th>Capabilities / version</th><th>Last seen</th><th>Controls</th></tr></thead>
+      <div className="table-responsive"><table className="data-table"><thead><tr><th>Mac / machine details</th><th>Connection / state</th><th>Capacity</th><th>Capabilities / version</th><th>Last seen</th><th>Controls</th></tr></thead>
         <tbody>{loading ? <tr><td colSpan={6}>Loading workers…</td></tr> : nodes.length === 0 ? <tr><td colSpan={6}>{authMode === "enrollment" ? "No Macs registered yet. Select Add Mac to connect your first worker." : "No Macs registered yet. Open the production MacOCR app on a Mac to connect it automatically."}</td></tr> : nodes.map(n => <tr key={n.nodeId}>
-          <td><strong>{n.name || "Unnamed Mac"}</strong><div className="worker-id">{n.nodeId}</div></td>
+          <td><strong>{n.name || "Unnamed Mac"}</strong><div className="worker-id">{n.nodeId}</div><details className="worker-machine"><summary>Machine details</summary><dl>
+            <dt>Model</dt><dd>{detail(n.metadata?.model)}</dd><dt>macOS</dt><dd>{detail(n.metadata?.os)}</dd>
+            <dt>Architecture</dt><dd>{detail(n.metadata?.architecture)}</dd><dt>Local user</dt><dd>{detail(n.metadata?.user)}</dd>
+            <dt>Hostname</dt><dd>{detail(n.metadata?.hostname)}</dd><dt>CPU cores</dt><dd>{typeof n.metadata?.cpuCores === "number" && n.metadata.cpuCores > 0 ? n.metadata.cpuCores : "Unknown"}</dd>
+            <dt>RAM</dt><dd>{memory(n.metadata?.memoryBytes)}</dd>
+          </dl></details></td>
           <td><span className={`badge ${n.connected && !n.revoked ? "badge-active" : "badge-disabled"}`}>{n.revoked ? "Revoked" : n.connected ? "Online" : "Offline"}</span><div>{n.paused ? "Paused" : n.state || "Unknown"}</div></td>
           <td>{n.capacity ? <><div>{n.capacity.active ?? 0} active · {n.capacity.available ?? 0} available</div><small>Limit {n.capacity.effectiveLimit ?? 0} / {n.capacity.operatorLimit ?? 0} · {n.capacity.availableUnits ?? 0} free units</small><div className="worker-id">{n.capacity.resourceReason || n.capacity.reason}</div></> : "—"}</td>
           <td>{n.capabilities?.join(", ") || "—"}<div className="worker-id">{n.version || "Version unavailable"}</div></td><td>{date(n.lastSeen)}</td>

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -101,7 +102,11 @@ func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 		}
 	}()
 	if err != nil {
-		s.logger.Warn("native capacity unavailable; delaying queue claim", "error", err)
+		if errors.Is(err, native.ErrNativeBusy) {
+			s.logger.Debug("native capacity unavailable; delaying queue claim", "error", err)
+		} else {
+			s.logger.Warn("native capacity unavailable; delaying queue claim", "error", err)
+		}
 		return
 	}
 	if capacity.EffectiveLimit <= 0 || capacity.Available <= 0 || capacity.State == "paused" || capacity.State == "busy" {

@@ -3,6 +3,8 @@ package rest
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -50,7 +52,7 @@ func RespondError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrUserDisabled):
 		p = errs.Forbidden("user account has been disabled")
 	case errors.Is(err, domain.ErrRateLimited):
-		c.Header("Retry-After", "1")
+		c.Header("Retry-After", rateLimitRetryAfter(time.Now().UTC()))
 		p = errs.New(errs.CodeRateLimited, http.StatusTooManyRequests, "Rate limit exceeded").WithDetail(err.Error())
 	case errors.Is(err, domain.ErrQuotaExceeded):
 		c.Header("Retry-After", "60")
@@ -79,3 +81,7 @@ func RespondProblem(c *gin.Context, p *errs.Problem) {
 	c.Header("Content-Type", "application/problem+json")
 	c.JSON(p.Status, p)
 }
+
+// Counters use UTC calendar-minute windows; round up the remaining fraction
+// so clients do not retry repeatedly before the bucket can accept requests.
+func rateLimitRetryAfter(now time.Time) string { return strconv.Itoa(60 - now.UTC().Second()) }

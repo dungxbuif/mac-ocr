@@ -13,9 +13,12 @@ struct WorkerMessage: Codable {
     var name: String?
     var version: String?
     var capabilities: [String]?
+    var metadata: WorkerMetadata?
 }
 
 enum OutboundProtocol {
+    static func displayName(nodeID: String) -> String { "Mac " + nodeID.suffix(8) }
+
     static func sharedSecret(configured: String, cached: String?) -> String {
         // A rebuilt release is the authority for key rotation. Keychain is
         // only a fallback for a build without a supplied production key.
@@ -111,7 +114,7 @@ final class OutboundConnector {
                 socket = ws; ws.resume()
                 do {
                     try await send(WorkerMessage(type: "hello", capacity: await state.getCapacity(), name: name,
-                        version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0", capabilities: ["ocr", "scan"]), socket: ws)
+                        version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0", capabilities: ["ocr", "scan"], metadata: WorkerMetadata.collect()), socket: ws)
                     heartbeat = Task { [weak self] in
                         guard let self else { return }
                         do {
@@ -133,7 +136,7 @@ final class OutboundConnector {
                     let code = (ws.response as? HTTPURLResponse)?.statusCode
                     if code == 401 || code == 403 || ws.closeCode == .policyViolation {
                         stopped = true
-                        status(false, "Credential rejected or revoked; enroll again")
+                        status(false, state.bearerCallbacks ? "Connection authorization failed; install the current app version" : "Connection authorization failed; connect this Mac again")
                     } else if !stopped { status(false, "Connection interrupted; reconnecting automatically") }
                 }
                 heartbeat?.cancel(); heartbeat = nil

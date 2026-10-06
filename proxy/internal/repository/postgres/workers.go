@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -46,7 +47,7 @@ func (r *WorkerRepository) Enroll(ctx context.Context, token, nodeID, name, secr
 	if tag.RowsAffected() != 1 {
 		return domain.ErrUnauthorized
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO native_workers(node_id,name,secret)VALUES($1,$2,$3) ON CONFLICT(node_id) DO UPDATE SET name=EXCLUDED.name,secret=EXCLUDED.secret,revoked=false`, nodeID, name, encrypted)
+	_, err = tx.Exec(ctx, `INSERT INTO native_workers(node_id,name,secret)VALUES($1,$2,$3) ON CONFLICT(node_id) DO UPDATE SET name=EXCLUDED.name,secret=EXCLUDED.secret,revoked=false,desired_control='resume'`, nodeID, name, encrypted)
 	if err != nil {
 		return err
 	}
@@ -64,7 +65,7 @@ func (r *WorkerRepository) Secret(ctx context.Context, nodeID string) (string, e
 	return r.cipher.Decrypt(encrypted)
 }
 func (r *WorkerRepository) ListWorkers(ctx context.Context) ([]native.WorkerNode, error) {
-	rows, err := r.pool.Query(ctx, `SELECT node_id,name,revoked FROM native_workers ORDER BY created_at DESC LIMIT 1000`)
+	rows, err := r.pool.Query(ctx, `SELECT node_id,name,revoked,metadata,desired_control FROM native_workers ORDER BY created_at DESC LIMIT 1000`)
 	if err != nil {
 		return nil, err
 	}
@@ -74,12 +75,38 @@ func (r *WorkerRepository) ListWorkers(ctx context.Context) ([]native.WorkerNode
 		var n native.WorkerNode
 		n.State = "offline"
 		n.Capabilities = []string{}
-		if err := rows.Scan(&n.NodeID, &n.Name, &n.Revoked); err != nil {
+		var metadata []byte
+		if err := rows.Scan(&n.NodeID, &n.Name, &n.Revoked, &metadata, &n.ControlAction); err != nil {
 			return nil, err
 		}
+		n.Metadata = &native.WorkerMetadata{}
+		if err := json.Unmarshal(metadata, n.Metadata); err != nil {
+			return nil, err
+		}
+		n.Paused = n.ControlAction != "resume"
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+func (r *WorkerRepository) SetDesiredControl(ctx context.Context, nodeID, action string) error {
+	if action != "pause" && action != "resume" && action != "drain" {
+		return domain.ErrBadParamInput
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE native_workers SET desired_control=$2 WHERE node_id=$1 AND NOT revoked`, nodeID, action)
+	if err == nil && tag.RowsAffected() != 1 {
+		return domain.ErrNotFound
+	}
+	return err
+}
+
+func (r *WorkerRepository) DesiredControl(ctx context.Context, nodeID string) (string, error) {
+	var action string
+	err := r.pool.QueryRow(ctx, `SELECT desired_control FROM native_workers WHERE node_id=$1 AND NOT revoked`, nodeID).Scan(&action)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", domain.ErrNotFound
+	}
+	return action, err
 }
 func (r *WorkerRepository) Revoke(ctx context.Context, nodeID string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE native_workers SET revoked=true WHERE node_id=$1`, nodeID)
@@ -124,5 +151,22 @@ func (r *WorkerRepository) RegisterShared(ctx context.Context, nodeID, secret st
 		return err
 	}
 	_, err = r.pool.Exec(ctx, `INSERT INTO native_workers(node_id,name,secret)VALUES($1,$1,$2) ON CONFLICT(node_id)DO NOTHING`, nodeID, encrypted)
+	return err
+}
+
+// Metadata is reported by an authenticated worker and returned only through
+// the session-protected admin roster. Never include it in public responses.
+func (r *WorkerRepository) UpdateMetadata(ctx context.Context, nodeID string, metadata native.WorkerMetadata) error {
+	if !native.ValidWorkerMetadata(metadata) {
+		return domain.ErrBadParamInput
+	}
+	body, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE native_workers SET metadata=$2 WHERE node_id=$1 AND NOT revoked`, nodeID, body)
+	if err == nil && tag.RowsAffected() != 1 {
+		return domain.ErrUnauthorized
+	}
 	return err
 }

@@ -21,13 +21,19 @@ For each protected request the service:
 5. Applies the per-key rate limit.
 6. Applies the aggregate per-account rate limit.
 
-The raw key must match `sk_ocr_` followed by 48 hexadecimal characters before any lookup. The server hashes it with SHA-256 and checks a five-minute Redis metadata cache first. Cache misses and cache errors fall back to PostgreSQL. Cached entries never contain the plaintext secret, and the disabled-user check still reads PostgreSQL on every request.
+The raw key must match `sk_ocr_` followed by 48 hexadecimal characters before any lookup. The server hashes it with SHA-256 and reads the authoritative key row in PostgreSQL on every request, then checks the account state. Redis may store five-minute metadata entries, but a positive cache never bypasses authoritative revocation or deactivation. Cached entries never contain the plaintext secret.
 
 ## Rate limiting
 
-Redis maintains fixed one-minute counters for both key and account principals. A transactional pipeline increments each counter and applies a two-minute expiry. Exceeding either configured RPM returns `429 RATE_LIMITED` with `Retry-After`.
+Redis maintains fixed UTC calendar-minute counters for both key and account principals. Each counter is incremented in a transactional pipeline with a two-minute cleanup expiry. Exceeding either configured RPM returns `429 RATE_LIMITED` and `Retry-After` in whole seconds until the next minute. The calendar boundary permits bursts across adjacent windows; this is a fixed-window policy rather than a rolling 60-second limit.
 
-Redis failure currently causes authentication to fail closed because a limit decision cannot be made.
+RequireAPIKey enforces both counters on OCR/scan/batch submissions, document/scan GET reads, `/v1/uploads/presign`, `/v1/events` connection setup, and GET/POST `/mcp`. Limits count HTTP requests, not documents or MCP tool calls. A batch is one rate unit; its documents reserve quota individually. Invalid authenticated requests still count. Per-key rejection occurs first and does not increment the account counter. Already-open SSE streams revalidate credentials without consuming further rate units.
+
+Zero on an existing key disables its per-key counter; zero account RPM disables the account counter. Both must be zero for unlimited requests. Creating a key with zero inherits the account RPM, and creation clamps a requested key limit above a positive account limit. Updating an existing key can set zero or a larger value; the independent aggregate account limit still caps traffic across all keys, so self-service cannot bypass it.
+
+API-key limits do not apply to public docs/health/capabilities, worker sockets/results, or cookie-session admin/self-service controls. Login has a separate in-memory five-attempt/minute policy per socket peer IP and normalized email hash, including successful attempts. Behind ingress several clients may share the peer-IP bucket; this policy is per proxy process, unlike the Redis-backed API counters.
+
+Redis rate-counter failure causes authentication to fail closed with HTTP 503 because a limit decision cannot be made. Client errors omit Redis connection details.
 
 Account quota/limit rows are cached in Redis for five minutes using cache-aside reads. Administrative limit changes refresh the entry. Quota reservation, refund, and reset invalidate it. Cache failures fall back to PostgreSQL for configuration reads; atomic quota enforcement always runs in PostgreSQL.
 
@@ -64,4 +70,4 @@ Exhausted quota returns `429 QUOTA_EXCEEDED`.
 
 The repository includes CLI commands for seeding an administrator, creating users, changing limits, resetting usage, disabling accounts, and creating/revoking keys. CLI key revocation requires both owner user ID and key ID so it can invalidate the correct Redis cache index. The web admin uses session and CSRF cookies for its protected dashboard endpoints and exposes an explicit account-deactivation action.
 
-All account-management and API-key routes require an administrator session. Mutating requests also require the session's CSRF token.
+Administrators manage users and account limits. Authenticated ordinary users may create/list/update/revoke keys, read account configuration, and reset passwords for their own account; cross-account requests are forbidden. Mutating session requests require the session's CSRF token. Worker roster and worker controls remain administrator-only.

@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"fmt"
 	"github.com/gorilla/websocket"
 	"macocr/proxy/domain"
 	"net/http"
@@ -44,6 +45,8 @@ type testWorkerStore struct {
 	mu       sync.Mutex
 	assigned map[string]string
 	revoked  bool
+	metadata *WorkerMetadata
+	control  string
 }
 
 func (s *testWorkerStore) CreateEnrollment(context.Context, string, time.Time) error    { return nil }
@@ -57,7 +60,9 @@ func (s *testWorkerStore) Secret(context.Context, string) (string, error) {
 	return "secret", nil
 }
 func (s *testWorkerStore) ListWorkers(context.Context) ([]WorkerNode, error) {
-	return []WorkerNode{{NodeID: "node_123"}}, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return []WorkerNode{{NodeID: "node_123", Metadata: s.metadata}}, nil
 }
 func (s *testWorkerStore) Revoke(context.Context, string) error {
 	s.mu.Lock()
@@ -77,6 +82,20 @@ func (s *testWorkerStore) AssignedNode(_ context.Context, docID, attemptID strin
 	return s.assigned[attemptID], nil
 }
 func (s *testWorkerStore) Routes(context.Context) ([]WorkerRoute, error) { return []WorkerRoute{}, nil }
+func (s *testWorkerStore) SetDesiredControl(_ context.Context, _ string, action string) error {
+	s.mu.Lock()
+	s.control = action
+	s.mu.Unlock()
+	return nil
+}
+func (s *testWorkerStore) DesiredControl(context.Context, string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.control == "" {
+		return "resume", nil
+	}
+	return s.control, nil
+}
 func TestSocketDispatchAndRevoke(t *testing.T) {
 	store := &testWorkerStore{assigned: map[string]string{}}
 	h := NewWorkerHub(store)
@@ -276,5 +295,119 @@ func TestReconnectDisplacesOldSessionAndPreservesPauseAndReservations(t *testing
 	_ = old.SetReadDeadline(time.Now().Add(time.Second))
 	if err := old.ReadJSON(&m); err == nil {
 		t.Fatal("stale session remained connected")
+	}
+}
+
+func TestPersistedDrainIsReappliedAfterHubRestart(t *testing.T) {
+	store := &testWorkerStore{assigned: map[string]string{}, control: "drain"}
+	hub := NewWorkerHub(store)
+	defer hub.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hub.ServeSocket(w, r, "node_123", "secret") }))
+	defer srv.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	capacity := domain.NativeCapacity{State: "ready", EffectiveLimit: 1, Available: 1, AvailableUnits: 1, ImageJobUnits: 1, PDFJobUnits: 1}
+	if err := conn.WriteJSON(WorkerMessage{Type: "hello", Capabilities: []string{"ocr"}, Capacity: &capacity}); err != nil {
+		t.Fatal(err)
+	}
+	var message WorkerMessage
+	if err := conn.ReadJSON(&message); err != nil || message.Type != "welcome" {
+		t.Fatalf("welcome %v %+v", err, message)
+	}
+	if err := conn.ReadJSON(&message); err != nil || message.Type != "control" || message.Action != "drain" {
+		t.Fatalf("persisted drain not reapplied: %v %+v", err, message)
+	}
+	if _, _, _, err := hub.Reserve(context.Background()); err == nil {
+		t.Fatal("persisted drain node became schedulable")
+	}
+}
+
+func TestWorkerMetadataValidation(t *testing.T) {
+	cases := []struct {
+		name     string
+		metadata WorkerMetadata
+		valid    bool
+	}{
+		{"empty", WorkerMetadata{}, true},
+		{"valid", WorkerMetadata{Model: "MacBookPro18,3", User: "dung", Hostname: "Dung Mac", OS: "macOS 15.7", Architecture: "arm64", CPUCores: 8, MemoryBytes: 16 << 30}, true},
+		{"control", WorkerMetadata{Hostname: "bad\nname", CPUCores: 8}, false},
+		{"too-long", WorkerMetadata{User: strings.Repeat("a", 257), CPUCores: 8}, false},
+		{"zero-cores-nonempty", WorkerMetadata{Model: "Mac", CPUCores: 0}, false},
+		{"negative-cores", WorkerMetadata{CPUCores: -1}, false},
+		{"excess-cores", WorkerMetadata{CPUCores: 4097}, false},
+		{"negative-memory", WorkerMetadata{CPUCores: 8, MemoryBytes: -1}, false},
+		{"excess-memory", WorkerMetadata{CPUCores: 8, MemoryBytes: (1 << 44) + 1}, false},
+		{"max-bounds", WorkerMetadata{CPUCores: 4096, MemoryBytes: 1 << 44}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ValidWorkerMetadata(tc.metadata); got != tc.valid {
+				t.Fatalf("valid=%v want %v", got, tc.valid)
+			}
+		})
+	}
+}
+
+func (s *testWorkerStore) UpdateMetadata(_ context.Context, nodeID string, metadata WorkerMetadata) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := metadata
+	s.metadata = &m
+	return nil
+}
+func TestHelloPersistsMetadataAndRejectsInvalidReport(t *testing.T) {
+	for _, valid := range []bool{true, false} {
+		t.Run(fmt.Sprint(valid), func(t *testing.T) {
+			store := &testWorkerStore{assigned: map[string]string{}}
+			hub := NewWorkerHub(store)
+			defer hub.Close()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hub.ServeSocket(w, r, "node_123", "secret") }))
+			defer srv.Close()
+			conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			metadata := WorkerMetadata{Model: "Mac14,2", User: "admin-private-user", OS: "macOS 15.7", Architecture: "arm64", CPUCores: 8, MemoryBytes: 16 << 30}
+			if !valid {
+				metadata.Hostname = "bad\nname"
+			}
+			if err := conn.WriteJSON(WorkerMessage{Type: "hello", Capabilities: []string{"ocr"}, Metadata: &metadata}); err != nil {
+				t.Fatal(err)
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+			var response WorkerMessage
+			err = conn.ReadJSON(&response)
+			if !valid {
+				if err == nil {
+					t.Fatal("invalid metadata received welcome")
+				}
+				store.mu.Lock()
+				saved := store.metadata
+				store.mu.Unlock()
+				if saved != nil {
+					t.Fatal("invalid metadata persisted")
+				}
+				return
+			}
+			if err != nil || response.Type != "welcome" {
+				t.Fatalf("welcome %v %+v", err, response)
+			}
+			if response.Metadata != nil {
+				t.Fatal("private metadata exposed in worker reply")
+			}
+			nodes, _, err := hub.Snapshot(context.Background())
+			if err != nil || len(nodes) != 1 || nodes[0].Metadata == nil || *nodes[0].Metadata != metadata {
+				t.Fatalf("hello metadata missing from admin snapshot: %+v %v", nodes, err)
+			}
+			hub.Close()
+			nodes, _, err = NewWorkerHub(store).Snapshot(context.Background())
+			if err != nil || nodes[0].Metadata == nil || *nodes[0].Metadata != metadata {
+				t.Fatal("metadata lost after hub restart")
+			}
+		})
 	}
 }

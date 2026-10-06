@@ -16,7 +16,17 @@ Authorization: Bearer sk_ocr_<secret>
 
 New keys use the `sk_ocr_` prefix. The plaintext key is returned only when it is created.
 
-The complete format is `sk_ocr_` followed by 48 hexadecimal characters. Authentication hashes the key and may validate active-key metadata from Redis; plaintext credentials are never cached. Revocation persists `revoked_at` and invalidates cached entries for the account. Disabled-account state is verified from PostgreSQL on every request.
+The complete format is `sk_ocr_` followed by 48 hexadecimal characters. Authentication hashes the key and checks its authoritative PostgreSQL row on every request; plaintext credentials are never cached. Revocation persists `revoked_at` and invalidates cached entries for the account. Disabled-account state is verified from PostgreSQL on every request.
+
+## Request rate limits
+
+OCR/scan/batch submissions, document/scan reads, presign requests, SSE connection setup, and both MCP HTTP methods enforce per-key and aggregate per-account RPM in Redis. They share fixed UTC calendar-minute windows. Limits count HTTP requests: one batch or MCP envelope consumes one request unit; document quota is separate. Requests rejected after authentication still count. An open SSE stream does not spend another request unit for each event.
+
+Exceeding either limit returns `429 RATE_LIMITED`; wait the number of seconds in `Retry-After` before retrying. The header reports the next minute reset, within 1–60 seconds. A Redis rate-counter outage returns HTTP 503 rather than granting unlimited access. Fixed-window boundaries can admit a burst spanning two adjacent minutes.
+
+Zero on an existing key disables only that key limit; zero account RPM disables only the aggregate account limit. When creating a key, zero inherits the account RPM and a value above a positive account limit is clamped. Updating a key can disable or raise its individual limit, while the independent account cap still applies across all keys. Regular users may manage their own keys; only administrators change account limits or inspect/control workers.
+
+Public docs/health/capabilities, worker connections/callbacks, and cookie-session controls do not consume these API-key counters. Login uses a separate five-attempt/minute limiter per socket peer IP and email, including successful attempts.
 
 ## Administrative account deactivation
 
@@ -27,6 +37,8 @@ The Swagger contract describes the public OCR and MCP data plane. Administrator 
 ## Worker administration and outbound connections
 
 The **Workers** dashboard manages native Mac installations. `GET /v1/admin/workers` returns `nodes`, `routes`, and `authMode`. The listing and `POST /v1/admin/workers/{nodeId}/control` require an administrator session; mutations also require `X-CSRF-Token`. Shared-key builds automatically register using WSS `/v1/workers/connect` with `Authorization: Bearer <shared secret>` and `X-Native-Node-Id`. HTTPS result callbacks and scan output use the same Bearer credential plus event/node identity headers; assignment and attempt checks still apply.
+
+Worker hello includes bounded machine `metadata`: `model`, `user`, `hostname`, `os`, `architecture`, `cpuCores`, and `memoryBytes`. The node identity is a stable hardware-identity hash, its name is generated automatically, and metadata is persisted for administrator viewing even while offline. There is no public worker inventory endpoint.
 
 Optional enrollment mode provides `POST /v1/admin/workers/enrollment` for a single-use 15-minute code. The Mac exchanges it at `POST /v1/workers/enroll` for a per-node credential and uses HMAC for native callbacks.
 

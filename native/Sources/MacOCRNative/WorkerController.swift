@@ -36,7 +36,7 @@ public final class WorkerController: ObservableObject {
     public let transport: String
     public let authMode: String
     @Published public var enrollmentToken = ""
-    @Published public var nodeName: String
+    public let nodeName: String
     private var outbound: OutboundConnector?
     private var wakeObserver: NSObjectProtocol?
     @Published public private(set) var authSecret: String
@@ -51,15 +51,20 @@ public final class WorkerController: ObservableObject {
     private var monitorTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var generation = UUID()
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    public let usesBuildConfiguration: Bool
     private let verifiedFingerprintKey = "MacOCRNative.verifiedConfigFingerprint"
     private let secretAccount = "native-auth-secret"
 
-    public init() {
+    public init(defaults: UserDefaults = .standard, bundleSettings: [String: String]? = nil, environment: [String: String] = ProcessInfo.processInfo.environment) {
+        self.defaults = defaults
         let bundle = Bundle.main
-        let environment = ProcessInfo.processInfo.environment
+        func bundled(_ key: String) -> String? { bundleSettings?[key] ?? bundle.object(forInfoDictionaryKey: key) as? String }
+        let pinned = bundled("MacOCRDefaultMode") == "production" && (bundled("MacOCRDefaultAuthMode") ?? "shared") == "shared" && (bundled("MacOCRDefaultTransport") ?? "websocket") == "websocket"
+        self.usesBuildConfiguration = pinned
+        let environment = pinned ? [:] : environment
         func buildDefault(_ key: String, fallback: String) -> String {
-            (bundle.object(forInfoDictionaryKey: key) as? String).flatMap { $0.isEmpty ? nil : $0 }
+            bundled(key).flatMap { $0.isEmpty ? nil : $0 }
                 ?? environment[key]
                 ?? fallback
         }
@@ -68,7 +73,7 @@ public final class WorkerController: ObservableObject {
         // A built app bundle is the deployment authority for mode: its MacOCRDefaultMode
         // must win over an ambient APP_ENV (the proxy/web knob) so a production bundle
         // never silently flips to development on a host that exports APP_ENV. The native
-        // runtime override MACOCR_MODE still takes precedence for operators.
+        // runtime override is available only outside pinned shared production.
         let defaultMode = environment["MACOCR_MODE"]
             ?? buildDefault("MacOCRDefaultMode", fallback: environment["APP_ENV"] ?? "development")
         let defaultPort = Int(buildDefault("MacOCRDefaultPort", fallback: environment["NATIVE_PORT"] ?? "8787")) ?? 8787
@@ -80,16 +85,16 @@ public final class WorkerController: ObservableObject {
         let defaultSecret = environment["NATIVE_AUTH_SECRET"]
             ?? buildDefault("MacOCRDefaultAuthSecret", fallback: "change-me-in-production")
 
-        self.proxyURL = defaults.string(forKey: "MacOCRNative.proxyURL") ?? defaultProxy
+        self.proxyURL = pinned ? defaultProxy : defaults.string(forKey: "MacOCRNative.proxyURL") ?? defaultProxy
         self.mode = defaultMode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        self.port = defaults.object(forKey: "MacOCRNative.port") == nil ? defaultPort : defaults.integer(forKey: "MacOCRNative.port")
-        self.operatorLimit = defaults.object(forKey: "MacOCRNative.operatorLimit") == nil ? defaultLimit : defaults.integer(forKey: "MacOCRNative.operatorLimit")
+        self.port = pinned ? defaultPort : defaults.object(forKey: "MacOCRNative.port") == nil ? defaultPort : defaults.integer(forKey: "MacOCRNative.port")
+        self.operatorLimit = pinned ? defaultLimit : defaults.object(forKey: "MacOCRNative.operatorLimit") == nil ? defaultLimit : defaults.integer(forKey: "MacOCRNative.operatorLimit")
         self.transport = environment["MACOCR_TRANSPORT"] ?? buildDefault("MacOCRDefaultTransport", fallback: "websocket")
         self.authMode = environment["MACOCR_AUTH_MODE"] ?? buildDefault("MacOCRDefaultAuthMode", fallback: "shared")
         self.nodeID = self.transport == "http" ? defaultNode : (self.authMode == "shared" ? OutboundProtocol.machineNodeID(hardwareID: OutboundProtocol.hostHardwareID(), defaults: defaults) : OutboundProtocol.installationID(defaults: defaults))
-        self.nodeName = defaults.string(forKey: "MacOCRNative.nodeName") ?? Host.current().localizedName ?? "Mac worker"
+        self.nodeName = OutboundProtocol.displayName(nodeID: self.nodeID)
         self.authSecret = ""
-        self.authSecret = self.transport == "http" ? (KeychainStore.read(account: secretAccount) ?? defaultSecret) : (self.authMode == "shared" ? OutboundProtocol.sharedSecret(configured: defaultSecret, cached: KeychainStore.read(account: "shared-" + self.proxyURL)) : (defaults.string(forKey: "MacOCRNative.enrolledOrigin") == (defaults.string(forKey: "MacOCRNative.proxyURL") ?? defaultProxy) ? KeychainStore.read(account: "outbound-" + self.nodeID) ?? "" : ""))
+        self.authSecret = pinned ? OutboundProtocol.sharedSecret(configured: defaultSecret, cached: nil) : self.transport == "http" ? (KeychainStore.read(account: secretAccount) ?? defaultSecret) : (self.authMode == "shared" ? OutboundProtocol.sharedSecret(configured: defaultSecret, cached: KeychainStore.read(account: "shared-" + self.proxyURL)) : (defaults.string(forKey: "MacOCRNative.enrolledOrigin") == (defaults.string(forKey: "MacOCRNative.proxyURL") ?? defaultProxy) ? KeychainStore.read(account: "outbound-" + self.nodeID) ?? "" : ""))
         self.logs = logRecorder.snapshot()
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
         self.logRecorder.setDebugEnabled(self.mode == "debug")
@@ -108,7 +113,7 @@ public final class WorkerController: ObservableObject {
     }
 
     public var isEnabled: Bool { startRequested || status == .online || status == .starting || status == .stopping }
-    public var toggleDisabled: Bool { status == .starting || status == .stopping }
+    public var toggleDisabled: Bool { status == .stopping }
     public var configurationLocked: Bool { status != .offline && status != .error }
     public var usesSharedAuth: Bool { usesOutbound && authMode == "shared" }
     public var usesOutbound: Bool { transport != "http" }
@@ -275,14 +280,14 @@ public final class WorkerController: ObservableObject {
         let currentGeneration = UUID()
         generation = currentGeneration
         let handler: NativeLogHandler = { [weak recorder = logRecorder] level, message in recorder?.emit(level, message) }
-        let state = NativeWorkerState(operatorLimit: operatorLimit, authSecret: authSecret, nodeId: nodeID, bearerCallbacks: usesSharedAuth, logger: handler)
+        let state = NativeWorkerState(operatorLimit: operatorLimit, authSecret: authSecret, nodeId: nodeID, bearerCallbacks: usesSharedAuth, adaptivePolicy: .configured(environment: usesBuildConfiguration ? [:] : ProcessInfo.processInfo.environment), logger: handler)
         if usesOutbound {
             workerState = state
             do {
                 let request = try OutboundProtocol.connectRequest(origin: proxyURL, nodeID: nodeID, secret: authSecret)
                 let connector = OutboundConnector(state: state, request: request, name: nodeName, limit: operatorLimit) { [weak self] connected, detail in
                     guard let self, self.generation == currentGeneration, self.status != .stopping else { return }
-                    self.status = connected ? .online : (detail.hasPrefix("Credential rejected") ? .error : .starting); self.statusDetail = detail
+                    self.status = connected ? .online : (detail.hasPrefix("Connection authorization failed") ? .error : .starting); self.statusDetail = detail
                     if self.status == .error {
                         self.startRequested = false
                         Task { _ = await state.updateOperatorLimit(0) }
@@ -376,7 +381,7 @@ public final class WorkerController: ObservableObject {
         if usesOutbound {
             _ = try OutboundProtocol.origin(trimmedURL)
             if mode == "production", url.scheme != "https" { throw configurationError("Production requires HTTPS") }
-            guard !authSecret.isEmpty else { throw configurationError("Configure the shared key or enroll this Mac first") }
+            guard !authSecret.isEmpty else { throw configurationError(usesSharedAuth ? "Connection setup is unavailable; install the current app version" : "Connect this Mac before starting") }
         }
         guard !authSecret.isEmpty else { throw configurationError("Native shared key is required") }
         if mode == "production" && (authSecret == "change-me-in-production" || authSecret.utf8.count < 32) {
@@ -385,12 +390,13 @@ public final class WorkerController: ObservableObject {
     }
 
     private func persistConfiguration() throws {
+        if usesBuildConfiguration { return }
         persistNonSecretConfiguration()
         try KeychainStore.write(authSecret, account: usesSharedAuth ? "shared-" + proxyURL : (usesOutbound ? "outbound-" + nodeID : secretAccount))
     }
 
     private func persistNonSecretConfiguration() {
-        defaults.set(nodeName, forKey: "MacOCRNative.nodeName")
+        if usesBuildConfiguration { return }
         defaults.set(proxyURL, forKey: "MacOCRNative.proxyURL")
         defaults.set(port, forKey: "MacOCRNative.port")
         defaults.set(operatorLimit, forKey: "MacOCRNative.operatorLimit")

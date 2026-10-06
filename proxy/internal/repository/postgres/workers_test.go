@@ -162,3 +162,54 @@ func TestWorkerClaimFiltersCapabilityAndAssignment(t *testing.T) {
 		t.Fatal("revoked node assigned")
 	}
 }
+
+func TestWorkerMetadataPersistsAcrossHubRestartAndRejectsRevokedUpdates(t *testing.T) {
+	pool, cipher := workerTestDB(t)
+	r := NewWorkerRepository(pool, cipher)
+	ctx := context.Background()
+	if err := r.RegisterShared(ctx, "metadata-node", "shared-secret"); err != nil {
+		t.Fatal(err)
+	}
+	metadata := native.WorkerMetadata{Model: "Mac14,2", User: "mac-user", Hostname: "Mac LAN", OS: "macOS 15.7", Architecture: "arm64", CPUCores: 8, MemoryBytes: 16 << 30}
+	if err := r.UpdateMetadata(ctx, "metadata-node", metadata); err != nil {
+		t.Fatal(err)
+	}
+	hub := native.NewWorkerHub(r)
+	nodes, _, err := hub.Snapshot(ctx)
+	if err != nil || len(nodes) != 1 || nodes[0].Metadata == nil || *nodes[0].Metadata != metadata {
+		t.Fatalf("offline metadata not retained: %+v %v", nodes, err)
+	}
+	if err := r.Revoke(ctx, "metadata-node"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.UpdateMetadata(ctx, "metadata-node", metadata); err == nil {
+		t.Fatal("revoked worker metadata updated")
+	}
+}
+
+func TestWorkerDesiredControlPersistsAndAppearsOffline(t *testing.T) {
+	pool, cipher := workerTestDB(t)
+	repo := NewWorkerRepository(pool, cipher)
+	ctx := context.Background()
+	if err := repo.RegisterShared(ctx, "control-node", "shared-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetDesiredControl(ctx, "control-node", "drain"); err != nil {
+		t.Fatal(err)
+	}
+	action, err := repo.DesiredControl(ctx, "control-node")
+	if err != nil || action != "drain" {
+		t.Fatalf("desired control=%q err=%v", action, err)
+	}
+	nodes, err := repo.ListWorkers(ctx)
+	if err != nil || len(nodes) != 1 || !nodes[0].Paused || nodes[0].ControlAction != "drain" {
+		t.Fatalf("offline control state missing: %+v err=%v", nodes, err)
+	}
+	if err := repo.SetDesiredControl(ctx, "control-node", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err = repo.ListWorkers(ctx)
+	if err != nil || nodes[0].Paused {
+		t.Fatalf("resume did not clear pause: %+v err=%v", nodes, err)
+	}
+}

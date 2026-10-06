@@ -4,6 +4,14 @@ Implementation work note, 2026-10-06. Approved goal: distribute one Mac app manu
 
 User follow-up authorizes removing the existing local OCR app and only the OCR mapping from `mac-service-tunnel`. Existing app path: `/Users/dungxbuif/Applications/Mac OCR Native.app`; tunnel also serves LM Studio, so retain its `mac-llm` section. Before local removal check active capacity, stop the idle old process, retain a private rollback copy of tunnel config, and replace the old app with the new outbound bundle. Confirm TCP 8787 closes and LLM tunnel remains running.
 
+Final UI requirement: no editable node name or shared-key/release engineering notes in the app. Generate the display label from its hashed fingerprint, ignore saved custom names, and show node identity/routing only in the admin dashboard. Rebuild/reinstall the manual app after this change. Production verification uses a temporary synthetic-only administrator/API key and image/PDF/scan fixtures; remove its objects, Redis entries and database rows after acceptance without touching other users or the registered Mac.
+
+User requests richer admin-only machine metadata. Send a `metadata` object on authenticated hello with `model`, `user`, `hostname`, `os`, `architecture`, `cpuCores`, and `memoryBytes`. Collect only these standard host properties, not raw hardware UUID/serial or secrets. Server validates bounded field sizes/numeric values and persists JSON metadata on native_workers; GET admin workers includes it for connected/offline nodes. App displays neither these identity fields nor naming controls. Tests cover hello encoding, metadata persistence/reconnect, unauthorized access, and invalid oversized metadata. Update public human/agent references and rebuild app/backend/dashboard for the final release.
+
+Latest UI contract: retain the original status card, capacity, logs, Launch at Login, quit action and on/off switch. Hide the entire Connection/configuration section, endpoint, credentials, node identity and machine metadata from the app. Connection URL, authentication, limits and operating mode come from the bundle; ignore stale editable connection preferences in this build. Allow switching off while connecting. Worker roster, host metadata and routing must be protected both by admin-only UI mounting and server-side role checks; verify anonymous 401 and authenticated ordinary-account 403.
+
+User also requested a live audit of existing proxy rate limits. Trace key/account counters, configuration cache invalidation, protected route coverage and error headers; reproduce boundaries with disposable synthetic credentials on production, avoiding other accounts. Record findings and any fix in API_LIMIT_DESIGN.md and public references before release.
+
 ## Version 1 contract
 
 - Go proxy and Swift app; React admin. One proxy replica owns sockets initially.
@@ -12,12 +20,14 @@ User follow-up authorizes removing the existing local OCR app and only the OCR m
 - `GET /v1/workers/connect`: WebSocket upgrade, headers `Authorization: Bearer <secret>` and `X-Native-Node-Id`. Production URL uses WSS. No secrets in URLs.
 - JSON messages: `{type,requestId?,capacity?,ocr?,scan?,accepted?,error?,name?,version?,capabilities?}`. Worker sends `hello` then `capacity` every 5 seconds. `capabilities` is an array containing `ocr` and/or `scan`. Server sends `ocr` or `scan` with the existing NativeOCRRequest/NativeScanRequest payload and requestId=attemptId. App reserves capacity before answering `{type:"ack",requestId,accepted:true|false}` and runs the existing engine in-process. Server sends `control` with `action:"pause"|"resume"|"drain"`; worker updates its operator limit and reports capacity. Shared mode completion and scan output use HTTPS Bearer authentication with node/event headers; assignment/attempt validation still applies. Optional enrollment mode retains per-node HMAC callbacks. No binary file streams over WSS.
 - `GET /v1/admin/workers`: `{nodes,routes}`. Nodes: `nodeId,name,version,state,connected,paused,lastSeen,capacity,capabilities,revoked`; routes: `nodeId,documentId,attemptId,kind,status,createdAt`. History initially bounded and operational, not an audit archive.
-- `POST /v1/admin/workers/:nodeId/control`: `{action:"pause"|"resume"|"drain"|"revoke"}`.
+- `POST /v1/admin/workers/:nodeId/control`: `{action:"pause"|"resume"|"drain"|"revoke"}`. Pause, drain, and resume intent persists with the worker row. A proxy restart or node reconnect reapplies the last intent before the node becomes eligible; registered offline nodes can be controlled in advance.
 - `NATIVE_TRANSPORT=websocket|http` (legacy default `http` until cutover). WebSocket mode does not require NATIVE_BASE_URL or legacy shared secret. `WORKER_AUTH_MODE=shared|enrollment` selects authentication. Shared mode uses `NATIVE_AUTH_SECRET`, distributed only in ignored/private app artifacts; enrollment mode needs no shared secret. Node metadata and optional credentials/enrollment persist in PostgreSQL. Scheduler dispatches weighted capacity without exceeding reservations. Disconnected/revoked nodes are ineligible. Late callbacks must match current DB attempt and assigned node. Unknown ACK outcomes retain existing lease to prevent immediate duplicate execution.
 
 ## Verification plan
 
 Backend race tests: enrollment expiry/reuse, bad credential, revoke, multi-node reservations, pause/drain, stale session, stale/wrong-node completion and capacity recovery. Native tests: protocol encoding, unique node identity, URL conversion, no listener in outbound mode; compile and Swift suite. React build and admin auth checks. Build manual share ZIP/DMG with production endpoint and only the explicitly authorized shared secret in private build artifacts. Synthetic OCR/scan E2E before production cutover; check WSS upgrade through real ingress. Document any live checks or deployment gates not exercised.
+
+Normal no-capacity states (no connected node, pause, drain, or all units busy) are debug telemetry rather than warning events. Warnings remain reserved for failures that require operator attention.
 
 ## Documentation scope
 

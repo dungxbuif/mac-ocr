@@ -140,6 +140,8 @@ CREATE TABLE IF NOT EXISTS native_workers (
  node_id TEXT PRIMARY KEY, name TEXT NOT NULL, secret BYTEA NOT NULL,
  revoked BOOLEAN NOT NULL DEFAULT false, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE native_workers ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE native_workers ADD COLUMN IF NOT EXISTS desired_control TEXT NOT NULL DEFAULT 'resume' CHECK (desired_control IN ('pause','resume','drain'));
 CREATE TABLE IF NOT EXISTS native_enrollments (
  token_hash TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ
 );

@@ -1,3 +1,20 @@
+# Release Notes — v2.0.0
+
+**Release Date:** October 6, 2026
+
+## Outbound Mac workers
+
+- Manually shared Universal Mac app connects to production over WSS from LAN or Internet. No per-Mac OCR tunnel or local HTTP port is required. The existing OCR and scan APIs remain compatible.
+- The app retains its compact status and capacity card, logs, Launch at Login, quit action and on/off switch. Endpoint, connection controls, shared authentication key, node identity and machine metadata are hidden from users; operational settings are set in the private build.
+- Administrator-only React Workers page shows connected/offline nodes, machine details, capacity and recent job routing, with pause, resume, drain and revoke controls. Ordinary accounts cannot access these APIs or UI.
+- Control messages travel over WSS; large inputs and scan outputs use HTTPS. Existing 100 MiB file limits and macOS 13 minimum remain. Release includes arm64 and x86_64; live hardware acceptance used the local Apple Silicon Mac.
+- Production uses one shared Bearer key as selected for this private distribution. Optional per-node enrollment and legacy HTTP transport remain available for rollback. Live socket ownership currently requires a single proxy replica.
+- Pause, Drain, and Resume now persist across proxy restarts and node reconnects, including controls applied while a registered node is offline. Normal paused/no-capacity polling is debug telemetry instead of one warning per second.
+- Rate-limit responses now report the remaining fixed-window delay in `Retry-After`; Redis counter failures return `503` instead of an internal `500`.
+- Verification includes real production image OCR, PDF OCR and scan output; backend race tests, PostgreSQL persistence, Swift socket fixtures and dashboard/docs builds. See the [Mac worker guide](guides/mac-workers.md) and the repository production runbook.
+
+---
+
 # Release Notes — v1.0.4
 
 **Release Date:** September 20, 2026

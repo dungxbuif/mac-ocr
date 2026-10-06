@@ -26,18 +26,20 @@ Upgrade: websocket.
 Authorization: Bearer <per-node credential>
 X-Native-Node-Id: <node id>
 
-JSON envelope fields: type, requestId, capacity, ocr, scan, accepted, error, name, version, capabilities, action (all except type are event-dependent).
+JSON envelope fields: type, requestId, capacity, ocr, scan, accepted, error, name, version, capabilities, action, metadata (all except type are event-dependent).
 Worker sends hello with name/version/capabilities then capacity every 5 seconds.
+Hello metadata fields: model, user, hostname, os, architecture, cpuCores, memoryBytes. Identity strings are bounded; raw hardware UUID/serial and secrets are not included. The display name is automatic from the fingerprint. Metadata is persisted and visible only through authenticated administrator worker listing; the app has no naming/identity panel.
 Capabilities: ocr, scan.
 Server sends type=ocr or type=scan, requestId=attemptId, and existing native request payload.
 Worker reserves capacity, sends type=ack with requestId and accepted, then executes engine directly in process.
 Server control actions: pause, resume, drain.
+The selected action persists per node. Pause/drain survives proxy restart and reconnect; an offline registered node accepts a desired control action.
 Input/output file bytes use job-specific HTTPS URLs rather than the socket.
 Shared mode uses Bearer-authenticated HTTPS completion/output; optional enrollment mode uses signed HTTPS native callback routes with the per-node secret.
 
 ## Administration
 GET /v1/admin/workers returns nodes, routes, and authMode (shared or enrollment).
-Node fields: nodeId, name, version, state, connected, paused, lastSeen, capacity, capabilities, revoked.
+Node fields: nodeId, name, version, state, connected, paused, lastSeen, capacity, capabilities, revoked, metadata.
 Route fields: nodeId, documentId, attemptId, kind, status, createdAt.
 POST /v1/admin/workers/:nodeId/control
 Body: {"action":"pause|resume|drain|revoke"}.
@@ -51,3 +53,7 @@ The WebSocket mode requires no Mac TCP listener or tunnel sidecar.
 Node metadata and optional credential/enrollment state persist in PostgreSQL. The ingress must permit socket upgrades and long-lived connections.
 Do not horizontally scale proxy replicas until cross-replica live-session dispatch is implemented.
 Mac sleep/offline or insufficient resources removes usable capacity. Reconnect never authorizes a stale result for another active attempt or node.
+
+## Distributed app UI
+
+The shared production release retains a status/capacity card plus logs, Launch at Login, quit and an on/off switch. It does not expose its endpoint, credentials, connection configuration, node identity or machine metadata. Endpoint, authentication, operating mode and resource policy are build-time bundle values; stored editable preferences do not override them. Worker identity, metadata, connection state and routing are available only through administrator-authorized APIs/UI. Anonymous access returns 401; authenticated non-administrators receive 403.

@@ -39,6 +39,8 @@ c.sendall(('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection
 hello = read()
 assert hello['type'] == 'hello' and hello['name'] == 'Fixture Mac'
 assert hello['capabilities'] == ['ocr','scan']
+assert set(hello['metadata']) == {'model','user','hostname','os','architecture','cpuCores','memoryBytes'}
+assert hello['metadata']['model'] and hello['metadata']['cpuCores'] > 0
 send({'type':'welcome'})
 send({'type':'ocr','requestId':'invalid-job'})
 ack = read()

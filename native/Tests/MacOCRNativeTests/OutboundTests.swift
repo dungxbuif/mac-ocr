@@ -92,4 +92,33 @@ final class OutboundTests: XCTestCase {
         XCTAssertEqual(OutboundProtocol.sharedSecret(configured: "", cached: "change-me-in-production"), "")
     }
 
+    func testAutomaticNameUsesFingerprintSuffix() {
+        XCTAssertEqual(OutboundProtocol.displayName(nodeID: "mac_0123456789abcdef"), "Mac 89abcdef")
+        XCTAssertEqual(OutboundProtocol.displayName(nodeID: "mac_0123456789abcdef"), OutboundProtocol.displayName(nodeID: "mac_0123456789abcdef"))
+    }
+
+    func testMetadataIsBoundedAndContainsOnlyDocumentedFields() throws {
+        let metadata = WorkerMetadata(model: String(repeating: "m", count: 1_000), user: "fixture-user", hostname: "fixture-host", os: "macOS fixture", architecture: "arm64", cpuCores: 8, memoryBytes: 123_456)
+        let encoded = try JSONEncoder().encode(metadata)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["model", "user", "hostname", "os", "architecture", "cpuCores", "memoryBytes"])
+        XCTAssertEqual(metadata.model.count, 256)
+        let unicode = WorkerMetadata(model: String(repeating: "😀", count: 1_000), user: "u", hostname: "h", os: "o", architecture: "a", cpuCores: 1, memoryBytes: 1)
+        XCTAssertLessThanOrEqual(unicode.model.utf8.count, 256)
+        XCTAssertEqual(try JSONDecoder().decode(WorkerMetadata.self, from: encoded), metadata)
+        let message = WorkerMessage(type: "hello", metadata: metadata)
+        let hello = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(message)) as? [String: Any])
+        XCTAssertNotNil(hello["metadata"])
+    }
+    func testCollectedMetadataHasMacModelAndResources() {
+        let metadata = WorkerMetadata.collect()
+        XCTAssertFalse(metadata.model.isEmpty)
+        XCTAssertFalse(metadata.user.isEmpty)
+        XCTAssertFalse(metadata.hostname.isEmpty)
+        XCTAssertTrue(metadata.os.hasPrefix("macOS "))
+        XCTAssertFalse(metadata.architecture.isEmpty)
+        XCTAssertGreaterThan(metadata.cpuCores, 0)
+        XCTAssertGreaterThan(metadata.memoryBytes, 0)
+    }
+
 }

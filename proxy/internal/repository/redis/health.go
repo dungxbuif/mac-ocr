@@ -52,7 +52,7 @@ func (r *Repository) Allow(ctx context.Context, id string, limit int) (bool, err
 	pipe.Expire(ctx, key, 2*time.Minute)
 	_, err := pipe.Exec(ctx)
 	if err != nil {
-		return false, fmt.Errorf("rate limit incr: %w", err)
+		return false, fmt.Errorf("%w: rate limit counter: %v", domain.ErrStorageUnavailable, err)
 	}
 	return incr.Val() <= int64(limit), nil
 }

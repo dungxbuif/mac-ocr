@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 type Transport interface {
@@ -21,17 +23,49 @@ type CapabilityTransport interface{ Supports(string) bool }
 type ReservationProvider interface {
 	Reserve(context.Context) (Transport, *domain.NativeCapacity, func(), error)
 }
+type WorkerMetadata struct {
+	Model        string `json:"model,omitempty"`
+	User         string `json:"user,omitempty"`
+	Hostname     string `json:"hostname,omitempty"`
+	OS           string `json:"os,omitempty"`
+	Architecture string `json:"architecture,omitempty"`
+	CPUCores     int    `json:"cpuCores,omitempty"`
+	MemoryBytes  int64  `json:"memoryBytes,omitempty"`
+}
+
+func ValidWorkerMetadata(m WorkerMetadata) bool {
+	if m == (WorkerMetadata{}) {
+		return true
+	}
+	if m.CPUCores < 1 || m.CPUCores > 4096 || m.MemoryBytes < 0 || m.MemoryBytes > 1<<44 {
+		return false
+	}
+	for _, value := range []string{m.Model, m.User, m.Hostname, m.OS, m.Architecture} {
+		if len(value) > 256 || !utf8.ValidString(value) {
+			return false
+		}
+		for _, character := range value {
+			if !unicode.IsPrint(character) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 type WorkerNode struct {
-	NodeID       string                `json:"nodeId"`
-	Name         string                `json:"name"`
-	Version      string                `json:"version"`
-	State        string                `json:"state"`
-	Connected    bool                  `json:"connected"`
-	Paused       bool                  `json:"paused"`
-	LastSeen     time.Time             `json:"lastSeen"`
-	Capacity     domain.NativeCapacity `json:"capacity"`
-	Capabilities []string              `json:"capabilities"`
-	Revoked      bool                  `json:"revoked"`
+	NodeID        string                `json:"nodeId"`
+	Name          string                `json:"name"`
+	Version       string                `json:"version"`
+	State         string                `json:"state"`
+	Connected     bool                  `json:"connected"`
+	Paused        bool                  `json:"paused"`
+	LastSeen      time.Time             `json:"lastSeen"`
+	Capacity      domain.NativeCapacity `json:"capacity"`
+	Capabilities  []string              `json:"capabilities"`
+	Revoked       bool                  `json:"revoked"`
+	Metadata      *WorkerMetadata       `json:"metadata,omitempty"`
+	ControlAction string                `json:"-"`
 }
 type WorkerRoute struct {
 	NodeID     string    `json:"nodeId"`
@@ -63,6 +97,7 @@ type WorkerMessage struct {
 	Accepted     bool                      `json:"accepted,omitempty"`
 	Error        string                    `json:"error,omitempty"`
 	Action       string                    `json:"action,omitempty"`
+	Metadata     *WorkerMetadata           `json:"metadata,omitempty"`
 }
 type workerSession struct {
 	node         WorkerNode
@@ -132,17 +167,29 @@ func (h *WorkerHub) Authenticate(ctx context.Context, nodeID, secret string) boo
 }
 
 func (h *WorkerHub) ServeSocket(w http.ResponseWriter, r *http.Request, nodeID, authenticatedSecret string) {
+	desiredAction := "resume"
+	if controls, ok := h.store.(interface {
+		DesiredControl(context.Context, string) (string, error)
+	}); ok {
+		var err error
+		desiredAction, err = controls.DesiredControl(r.Context(), nodeID)
+		if err != nil {
+			http.Error(w, "worker state unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	conn, err := (&websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096}).Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	conn.SetReadLimit(64 << 10)
 	_ = conn.SetReadDeadline(time.Now().Add(20 * time.Second))
-	s := &workerSession{node: WorkerNode{NodeID: nodeID, Connected: true, LastSeen: time.Now(), Capabilities: []string{}}, conn: conn, pending: map[string]chan bool{}, reservations: map[*workerReservation]struct{}{}}
+	s := &workerSession{node: WorkerNode{NodeID: nodeID, Connected: true, Paused: desiredAction != "resume", ControlAction: desiredAction, LastSeen: time.Now(), Capabilities: []string{}}, conn: conn, pending: map[string]chan bool{}, reservations: map[*workerReservation]struct{}{}}
 	h.mu.Lock()
 	old := h.sessions[nodeID]
 	if old != nil {
 		s.node.Paused = old.node.Paused
+		s.node.ControlAction = old.node.ControlAction
 		for reservation := range old.reservations {
 			s.reservations[reservation] = struct{}{}
 		}
@@ -178,10 +225,23 @@ func (h *WorkerHub) ServeSocket(w http.ResponseWriter, r *http.Request, nodeID, 
 			if hello || len(msg.Name) > 128 || len(msg.Version) > 128 || len(msg.Capabilities) > 8 {
 				return
 			}
+			if msg.Metadata != nil && !ValidWorkerMetadata(*msg.Metadata) {
+				return
+			}
 			hello = true
 			if !h.AuthorizeBearer(r.Context(), nodeID, authenticatedSecret) {
 				return
 			}
+			if msg.Metadata != nil {
+				if store, ok := h.store.(interface {
+					UpdateMetadata(context.Context, string, WorkerMetadata) error
+				}); ok {
+					if err := store.UpdateMetadata(r.Context(), nodeID, *msg.Metadata); err != nil {
+						return
+					}
+				}
+			}
+
 		}
 		if msg.Capacity != nil && !validCapacity(*msg.Capacity) {
 			return
@@ -196,6 +256,7 @@ func (h *WorkerHub) ServeSocket(w http.ResponseWriter, r *http.Request, nodeID, 
 			s.node.Name = msg.Name
 			s.node.Version = msg.Version
 			s.node.Capabilities = msg.Capabilities
+			s.node.Metadata = msg.Metadata
 		}
 		if msg.Capacity != nil {
 			s.node.Capacity = *msg.Capacity
@@ -217,9 +278,13 @@ func (h *WorkerHub) ServeSocket(w http.ResponseWriter, r *http.Request, nodeID, 
 			}
 			h.mu.Lock()
 			paused := s.node.Paused
+			action := s.node.ControlAction
 			h.mu.Unlock()
 			if paused {
-				if err := s.write(WorkerMessage{Type: "control", Action: "pause"}); err != nil {
+				if action != "drain" {
+					action = "pause"
+				}
+				if err := s.write(WorkerMessage{Type: "control", Action: action}); err != nil {
 					return
 				}
 			}
@@ -256,8 +321,16 @@ func (h *WorkerHub) Snapshot(ctx context.Context) ([]WorkerNode, []WorkerRoute, 
 	for i := range nodes {
 		if s := h.sessions[nodes[i].NodeID]; s != nil {
 			revoked := nodes[i].Revoked
+			metadata := nodes[i].Metadata
+			controlAction := nodes[i].ControlAction
 			nodes[i] = s.node
+			if nodes[i].Metadata == nil {
+				nodes[i].Metadata = metadata
+			}
 			nodes[i].Revoked = revoked
+			if nodes[i].ControlAction == "" {
+				nodes[i].ControlAction = controlAction
+			}
 			nodes[i].Connected = nodes[i].Connected && !revoked && time.Since(nodes[i].LastSeen) < 20*time.Second
 		}
 		if !nodes[i].Connected {
@@ -275,10 +348,22 @@ func (h *WorkerHub) Control(ctx context.Context, nodeID, action string) error {
 			return err
 		}
 	}
+	persisted := false
+	if action != "revoke" {
+		if controls, ok := h.store.(interface {
+			SetDesiredControl(context.Context, string, string) error
+		}); ok {
+			if err := controls.SetDesiredControl(ctx, nodeID, action); err != nil {
+				return err
+			}
+			persisted = true
+		}
+	}
 	h.mu.Lock()
 	s := h.sessions[nodeID]
 	if s != nil {
 		s.node.Paused = action != "resume"
+		s.node.ControlAction = action
 		if action == "revoke" {
 			s.node.Revoked = true
 			s.node.Connected = false
@@ -286,7 +371,7 @@ func (h *WorkerHub) Control(ctx context.Context, nodeID, action string) error {
 	}
 	h.mu.Unlock()
 	if s == nil {
-		if action == "revoke" {
+		if action == "revoke" || persisted {
 			return nil
 		}
 		return domain.ErrNotFound

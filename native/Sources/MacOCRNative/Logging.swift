@@ -47,7 +47,8 @@ public final class NativeLogRecorder: @unchecked Sendable {
     public let fileURL: URL
 
     private init() {
-        let configuredDays = ProcessInfo.processInfo.environment["MACOCR_LOG_RETENTION_DAYS"]
+        let production = Bundle.main.object(forInfoDictionaryKey: "MacOCRDefaultMode") as? String == "production"
+        let configuredDays = (production ? nil : ProcessInfo.processInfo.environment["MACOCR_LOG_RETENTION_DAYS"])
             ?? Bundle.main.object(forInfoDictionaryKey: "MacOCRLogRetentionDays") as? String
         let retentionDays = min(max(Int(configuredDays ?? "") ?? 30, 1), 365)
         self.maxLogAge = TimeInterval(retentionDays * 24 * 60 * 60)

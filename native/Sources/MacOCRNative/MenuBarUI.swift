@@ -58,84 +58,7 @@ public struct ControlPanelView: View {
                 .lineLimit(3)
                 .frame(minHeight: 36, alignment: .topLeading)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Connection").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                TextField("Proxy URL", text: Binding(get: { controller.proxyURL }, set: { controller.updateProxyURL($0) }))
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(controller.configurationLocked)
-
-                HStack {
-                    Label(
-                        controller.debugLoggingEnabled ? "Debug diagnostics enabled" : "Standard diagnostics",
-                        systemImage: controller.debugLoggingEnabled ? "ladybug.fill" : "checkmark.shield"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("Mode: \(controller.mode)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                HStack(spacing: 10) {
-                    if !controller.usesOutbound {
-                    Stepper(value: Binding(get: { controller.port }, set: { controller.updatePort($0) }), in: 1...65_535) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Local port").font(.caption2).foregroundStyle(.secondary)
-                            Text("\(controller.port)").fontDesign(.monospaced)
-                        }
-                    }
-                    }
-                    Stepper(value: Binding(get: { controller.operatorLimit }, set: { controller.updateOperatorLimit($0) }), in: 0...256) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Concurrency ceiling").font(.caption2).foregroundStyle(.secondary)
-                            Text("\(controller.operatorLimit)").fontDesign(.monospaced)
-                        }
-                    }
-                }
-                .disabled(controller.configurationLocked)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    if controller.usesOutbound {
-                        TextField("Node name", text: $controller.nodeName).textFieldStyle(.roundedBorder)
-                        if !controller.usesSharedAuth {
-                        SecureField("Enrollment code from dashboard", text: $controller.enrollmentToken).textFieldStyle(.roundedBorder)
-                        Button("Enroll and connect") { controller.enroll() }.disabled(controller.configurationLocked || controller.connectionStatus == .testing)
-                        } else {
-                            Text("Shared production key · automatic machine identity").font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Text(controller.usesSharedAuth ? "Shared release automatically connects to production" : "Identity and key stay on this Mac in Keychain").font(.caption2).foregroundStyle(.secondary)
-                    } else {
-                    Text("Connection key (HMAC)").font(.caption2).foregroundStyle(.secondary)
-                    SecureField("Enter connection key", text: Binding(get: { controller.authSecret }, set: { controller.updateAuthSecret($0) }))
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(controller.configurationLocked)
-                    Text("Must match proxy NATIVE_AUTH_SECRET")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                }
-                HStack {
-                    Button { controller.testConnection() } label: {
-                        if controller.connectionStatus == .testing {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Test connection", systemImage: "bolt.horizontal.circle")
-                        }
-                    }
-                    .disabled(controller.configurationLocked || controller.connectionStatus == .testing)
-                    connectionLabel
-                    Spacer()
-                }
-            }
-            .padding(12)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-
             VStack(spacing: 0) {
-                detailRow("Endpoint", value: controller.endpoint)
-                Divider()
                 detailRow("Capacity", value: capacityText)
             }
             .background(Color(nsColor: .controlBackgroundColor))
@@ -169,7 +92,7 @@ public struct ControlPanelView: View {
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 430, height: 600)
+        .frame(width: 430, height: 360)
     }
 
     private var capacityText: String {
@@ -188,19 +111,6 @@ public struct ControlPanelView: View {
         .padding(.vertical, 9)
     }
 
-    @ViewBuilder
-    private var connectionLabel: some View {
-        switch controller.connectionStatus {
-        case .notTested:
-            Label("Not tested", systemImage: "circle.dashed").foregroundStyle(.secondary)
-        case .testing:
-            Text("Checking proxy and key…").foregroundStyle(.secondary)
-        case .verified:
-            Label("Proxy verified", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-        case .failed:
-            Label("Failed", systemImage: "xmark.circle.fill").foregroundStyle(.red)
-        }
-    }
 }
 
 public struct LogWindowView: View {
@@ -308,7 +218,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
-        popover.contentSize = NSSize(width: 430, height: 600)
+        popover.contentSize = NSSize(width: 430, height: 360)
         popover.contentViewController = NSHostingController(rootView: ControlPanelView(controller: controller))
 
         controller.showLogs = { [weak self] in self?.showLogWindow() }

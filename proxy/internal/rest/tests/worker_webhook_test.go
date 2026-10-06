@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -119,5 +120,77 @@ func TestSharedScanUploadRejectsWrongAssignedWorker(t *testing.T) {
 	router.ServeHTTP(w, req)
 	if w.Code != 409 {
 		t.Fatalf("wrong assigned scan worker accepted: %d", w.Code)
+	}
+}
+
+type privateMetadataStore struct{ callbackWorkerStore }
+
+func (privateMetadataStore) ListWorkers(context.Context) ([]native.WorkerNode, error) {
+	return []native.WorkerNode{{NodeID: "owner", Metadata: &native.WorkerMetadata{User: "private-mac-user", Model: "Mac14,2", CPUCores: 8}}}, nil
+}
+func TestWorkerMetadataRequiresAdminSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	users := newMockUserRepo()
+	admin := &domain.User{ID: 1, Role: domain.RoleAdmin}
+	user := &domain.User{ID: 2, Role: domain.RoleUser}
+	users.users[1] = admin
+	users.users[2] = user
+	sm := rest.NewSessionManager(newMockRedisSessionRepo())
+	auth := rest.NewAdminAuthHandler(users, nil, sm, false)
+	store := privateMetadataStore{}
+	handler := rest.NewWorkersHandler(native.NewWorkerHub(store), store)
+	router := gin.New()
+	router.Group("/v1/admin", auth.RequireAdminSession()).GET("/workers", handler.List)
+	send := func(token string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest("GET", "/v1/admin/workers", nil)
+		if token != "" {
+			request.AddCookie(&http.Cookie{Name: rest.SessionCookieName, Value: token})
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	userToken, _ := sm.Create(user)
+	adminToken, _ := sm.Create(admin)
+	for _, token := range []string{"", userToken} {
+		response := send(token)
+		if response.Code == 200 || bytes.Contains(response.Body.Bytes(), []byte("private-mac-user")) {
+			t.Fatal("metadata exposed without admin session")
+		}
+	}
+	response := send(adminToken)
+	if response.Code != 200 || !bytes.Contains(response.Body.Bytes(), []byte("private-mac-user")) {
+		t.Fatalf("admin cannot inspect metadata: %d", response.Code)
+	}
+}
+
+func TestOrdinaryUserCannotControlWorkersWithValidOwnCSRF(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	users := newMockUserRepo()
+	user := &domain.User{ID: 2, Role: domain.RoleUser}
+	users.users[2] = user
+	sm := rest.NewSessionManager(newMockRedisSessionRepo())
+	auth := rest.NewAdminAuthHandler(users, nil, sm, false)
+	store := privateMetadataStore{}
+	handler := rest.NewWorkersHandler(native.NewWorkerHub(store), store)
+	router := gin.New()
+	group := router.Group("/v1/admin", auth.RequireAdminSession())
+	group.GET("/workers", handler.List)
+	group.POST("/workers/:nodeId/control", handler.Control)
+	token, csrf := sm.Create(user)
+	for _, path := range []string{"/v1/admin/workers", "/v1/admin/workers/owner/control"} {
+		method := "GET"
+		if strings.HasSuffix(path, "control") {
+			method = "POST"
+		}
+		request := httptest.NewRequest(method, path, bytes.NewBufferString(`{"action":"revoke"}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-CSRF-Token", csrf)
+		request.AddCookie(&http.Cookie{Name: rest.SessionCookieName, Value: token})
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != 403 {
+			t.Fatalf("ordinary user path=%s status=%d", path, response.Code)
+		}
 	}
 }
