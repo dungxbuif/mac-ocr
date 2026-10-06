@@ -6,7 +6,8 @@
 
 - Manually shared Universal Mac app connects to production over WSS from LAN or Internet. No per-Mac OCR tunnel or local HTTP port is required. The existing OCR and scan APIs remain compatible.
 - The app retains its compact status and capacity card, logs, Launch at Login, quit action and on/off switch. Endpoint, connection controls, shared authentication key, node identity and machine metadata are hidden from users; operational settings are set in the private build.
-- Administrator-only React Workers page shows connected/offline nodes, machine details, capacity and recent job routing, with pause, resume, drain and revoke controls. Ordinary accounts cannot access these APIs or UI.
+- Administrator-only React Workers page keeps machine details expanded, shows one effective node status, capacity and recent job routing, with pause, resume, drain and revoke controls. User Management and Workers/Routing APIs and UI remain inaccessible to ordinary accounts.
+- Admin navigation now uses stable routes for Users, Workers, and API Keys, including direct-load and browser back/forward support.
 - Control messages travel over WSS; large inputs and scan outputs use HTTPS. Existing 100 MiB file limits and macOS 13 minimum remain. Release includes arm64 and x86_64; live hardware acceptance used the local Apple Silicon Mac.
 - Production uses one shared Bearer key as selected for this private distribution. Optional per-node enrollment and legacy HTTP transport remain available for rollback. Live socket ownership currently requires a single proxy replica.
 - Pause, Drain, and Resume now persist across proxy restarts and node reconnects, including controls applied while a registered node is offline. Normal paused/no-capacity polling is debug telemetry instead of one warning per second.

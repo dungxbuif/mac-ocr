@@ -10,6 +10,8 @@ User requests richer admin-only machine metadata. Send a `metadata` object on au
 
 Latest UI contract: retain the original status card, capacity, logs, Launch at Login, quit action and on/off switch. Hide the entire Connection/configuration section, endpoint, credentials, node identity and machine metadata from the app. Connection URL, authentication, limits and operating mode come from the bundle; ignore stale editable connection preferences in this build. Allow switching off while connecting. Worker roster, host metadata and routing must be protected both by admin-only UI mounting and server-side role checks; verify anonymous 401 and authenticated ordinary-account 403.
 
+Admin roster presentation: machine metadata is always expanded in the protected Workers table; it does not require a disclosure click. Present one effective status per node (`Revoked`, `Offline`, `Paused`, or the connected worker state) instead of separate connection and state values. User Management and Mac Workers & Routing remain admin-only in both navigation and API authorization. Admin sections have stable browser routes (`/admin/users`, `/admin/workers`, `/admin/api-keys`); the ordinary self-service portal uses `/admin/portal`. Direct navigation and refresh serve the SPA shell, while role checks choose which routes may render.
+
 User also requested a live audit of existing proxy rate limits. Trace key/account counters, configuration cache invalidation, protected route coverage and error headers; reproduce boundaries with disposable synthetic credentials on production, avoiding other accounts. Record findings and any fix in API_LIMIT_DESIGN.md and public references before release.
 
 ## Version 1 contract

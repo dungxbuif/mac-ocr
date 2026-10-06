@@ -86,11 +86,32 @@ function generateStrongPassword(): string {
   return pass;
 }
 
+type AppView = "users" | "keys" | "workers" | "portal";
+const viewPath: Record<AppView, string> = {
+  users: "/admin/users",
+  workers: "/admin/workers",
+  keys: "/admin/api-keys",
+  portal: "/admin/portal",
+};
+function viewFromPath(path: string): AppView {
+  const normalized = path.replace(/\/+$/, "");
+  if (normalized === "/admin/workers") return "workers";
+  if (normalized === "/admin/api-keys") return "keys";
+  if (normalized === "/admin/portal") return "portal";
+  return "users";
+}
+
 function App() {
   const [session, setSession] = useState<{ loading: boolean; user: User | null }>({ loading: true, user: null });
   const [csrf, setCsrf] = useState(() => getCookie("macocr_csrf"));
   const [toast, setToast] = useState("");
-  const [adminView, setAdminView] = useState<"users" | "keys" | "workers">("users");
+  const [adminView, setAdminView] = useState<AppView>(() => viewFromPath(window.location.pathname));
+
+  const navigate = useCallback((view: AppView, replace = false) => {
+    const method = replace ? "replaceState" : "pushState";
+    window.history[method]({}, "", viewPath[view]);
+    setAdminView(view);
+  }, []);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -125,6 +146,19 @@ function App() {
       .catch(() => setSession({ loading: false, user: null }));
   }, [api]);
 
+  useEffect(() => {
+    const onPopState = () => setAdminView(viewFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!session.user) return;
+    const isAdmin = session.user.role === "admin";
+    if (!isAdmin && adminView !== "portal") navigate("portal", true);
+    if (isAdmin && adminView === "portal") navigate("users", true);
+  }, [adminView, navigate, session.user]);
+
   async function login(email: string, pass: string) {
     const response = await fetch("/v1/auth/login", {
       method: "POST",
@@ -135,6 +169,7 @@ function App() {
     if (!response.ok) throw new Error(data.detail || "Invalid email or password");
     setCsrf(data.csrfToken || getCookie("macocr_csrf"));
     setSession({ loading: false, user: data.user });
+    navigate(data.user.role === "admin" ? viewFromPath(window.location.pathname) === "portal" ? "users" : viewFromPath(window.location.pathname) : "portal", true);
     notify("Signed in successfully");
   }
 
@@ -142,6 +177,7 @@ function App() {
     await api("/v1/auth/logout", { method: "POST" });
     setCsrf("");
     setSession({ loading: false, user: null });
+    window.history.replaceState({}, "", "/admin/");
   }
 
   if (session.loading) {
@@ -173,28 +209,28 @@ function App() {
         <nav className="nav">
           {isAdmin ? (
             <>
-              <button
-                type="button"
+              <a
+                href={viewPath.users}
                 className={`nav-link nav-button ${adminView === "users" ? "active" : ""}`}
-                onClick={() => setAdminView("users")}
+                onClick={(event) => { event.preventDefault(); navigate("users"); }}
               >
                 <UsersIcon size={16} />
                 <span>User Accounts & Quotas</span>
-              </button>
-              <button type="button" className={`nav-link nav-button ${adminView === "workers" ? "active" : ""}`} onClick={() => setAdminView("workers")}>
+              </a>
+              <a href={viewPath.workers} className={`nav-link nav-button ${adminView === "workers" ? "active" : ""}`} onClick={(event) => { event.preventDefault(); navigate("workers"); }}>
                 <Activity size={16} /><span>Mac Workers & Routing</span>
-              </button>
-              <button
-                type="button"
+              </a>
+              <a
+                href={viewPath.keys}
                 className={`nav-link nav-button ${adminView === "keys" ? "active" : ""}`}
-                onClick={() => setAdminView("keys")}
+                onClick={(event) => { event.preventDefault(); navigate("keys"); }}
               >
                 <Key size={16} />
                 <span>My API Keys</span>
-              </button>
+              </a>
             </>
           ) : (
-            <a href="#/portal" className="nav-link active">
+            <a href={viewPath.portal} className="nav-link active" onClick={(event) => { event.preventDefault(); navigate("portal"); }}>
               <Key size={16} />
               <span>API Credentials & Limits</span>
             </a>

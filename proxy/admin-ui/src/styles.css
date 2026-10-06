@@ -449,7 +449,6 @@ h1 {
 .worker-code { display: block; overflow-wrap: anywhere; user-select: all; padding: 16px; background: #f1f5f9; border-radius: 8px; margin: 20px 0; }
 
 .worker-machine { margin-top: 10px; min-width: 190px; }
-.worker-machine summary { cursor: pointer; font-size: 12px; color: var(--text-dim); }
-.worker-machine dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 12px 0 0; font-size: 12px; }
+.worker-machine dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 12px; }
 .worker-machine dt { color: var(--text-dim); }
 .worker-machine dd { margin: 0; overflow-wrap: anywhere; }
