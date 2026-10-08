@@ -100,6 +100,15 @@ func TestWorkerEnrollmentExpiryReuseAndRevoke(t *testing.T) {
 	if _, err := r.Secret(ctx, nodeID); err == nil {
 		t.Fatal("revoked key resolved")
 	}
+	if err := r.Activate(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if secret, err := r.Secret(ctx, nodeID); err != nil || secret != "secret" {
+		t.Fatal("activation did not restore credential", err)
+	}
+	if err := r.Revoke(ctx, nodeID); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.RegisterShared(ctx, nodeID, "new-shared-secret"); err != nil {
 		t.Fatal(err)
 	}

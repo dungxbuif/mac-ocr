@@ -100,7 +100,10 @@ Clients cannot list, delete, or cancel documents through the public API. The Pos
 - API-key cache entries contain metadata keyed by the SHA-256 key hash, never the plaintext credential. Revocation invalidates all cached keys for that account; disabled-user state is still read from PostgreSQL for every request.
 - Public and MCP result reads obtain the payload directly from Redis after verifying document ownership/state in PostgreSQL.
 - A periodic retention worker clears expired payload fields, best-effort deletes object copies, and deletes terminal PostgreSQL document rows after `DOCUMENT_TTL`.
-- The scheduler claims queued rows using `FOR UPDATE SKIP LOCKED`.
+- The scheduler claims queued rows using `FOR UPDATE SKIP LOCKED`. PDF text
+  extraction claims (`processingMode=auto|text`) are independent of native
+  worker capacity and run through the proxy background extractor; OCR and scan
+  claims remain capacity-aware.
 - Input is dispatched to the worker through a short-lived presigned URL.
 - Worker callbacks use HMAC-SHA256 and a five-minute timestamp window.
 

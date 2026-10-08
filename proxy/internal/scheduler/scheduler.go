@@ -1,14 +1,18 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"macocr/proxy/domain"
 	"macocr/proxy/internal/native"
+	"macocr/proxy/internal/pdfinspector"
 	"macocr/proxy/internal/usecase/auth"
 )
 
@@ -23,6 +27,9 @@ type Scheduler struct {
 	lease       time.Duration
 	maxAttempts int
 	wakeCh      chan struct{}
+	text        pdfinspector.Processor
+	results     domain.ResultCache
+	resultTTL   time.Duration
 }
 
 type workerCapacityClaimer interface {
@@ -30,6 +37,9 @@ type workerCapacityClaimer interface {
 }
 type weightedCapacityClaimer interface {
 	ClaimNextWithinCapacity(ctx context.Context, attemptID string, lease time.Duration, maxAttempts, availableUnits, imageJobUnits, pdfJobUnits int) (*domain.Document, error)
+}
+type textExtractionClaimer interface {
+	ClaimNextForText(ctx context.Context, attemptID string, lease time.Duration, maxAttempts int) (*domain.Document, error)
 }
 
 func New(
@@ -61,6 +71,12 @@ func New(
 	}
 }
 
+func (s *Scheduler) SetPDFTextProcessor(processor pdfinspector.Processor) { s.text = processor }
+
+func (s *Scheduler) SetResultCache(results domain.ResultCache, ttl time.Duration) {
+	s.results, s.resultTTL = results, ttl
+}
+
 func (s *Scheduler) Wake() {
 	select {
 	case s.wakeCh <- struct{}{}:
@@ -86,6 +102,20 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 	s.failExhaustedAttempts(ctx)
+	if s.text != nil {
+		if claimer, ok := s.docs.(textExtractionClaimer); ok {
+			attemptID := fmt.Sprintf("att_text_%x", time.Now().UnixNano())
+			doc, err := claimer.ClaimNextForText(ctx, attemptID, s.lease, s.maxAttempts)
+			if err != nil {
+				s.logger.Error("claim next text PDF failed", "error", err)
+				return
+			}
+			if doc != nil {
+				go s.processPDFText(ctx, doc)
+				return
+			}
+		}
+	}
 	transport := s.native
 	var release func()
 	var capacity *domain.NativeCapacity
@@ -186,6 +216,98 @@ func (s *Scheduler) pollAndDispatch(ctx context.Context) {
 		return
 	}
 
+}
+
+func (s *Scheduler) processPDFText(ctx context.Context, doc *domain.Document) {
+	result, err := s.text.Extract(ctx, doc)
+	mode := "auto"
+	if doc.Options != nil && doc.Options.ProcessingMode != "" {
+		mode = doc.Options.ProcessingMode
+	}
+	if err != nil || !result.UsableText() {
+		if mode == "text" {
+			detail := "PDF does not contain usable native text"
+			if err != nil {
+				detail = err.Error()
+			}
+			s.finalizeTextFailure(ctx, doc, detail)
+			return
+		}
+		if releaseErr := s.docs.ReleaseAttempt(ctx, doc.ID, doc.AttemptID); releaseErr != nil {
+			s.logger.Error("release PDF text attempt for OCR fallback failed", "docID", doc.ID, "error", releaseErr)
+		}
+		s.Wake()
+		return
+	}
+
+	ocrResult := result.ToOCRResult()
+	resultBytes, err := json.Marshal(ocrResult)
+	if err != nil {
+		s.finalizeTextFailure(ctx, doc, fmt.Sprintf("encode extracted PDF text: %v", err))
+		return
+	}
+	eventID := "evt_text_" + strings.TrimPrefix(doc.AttemptID, "att_text_")
+	resultKey := fmt.Sprintf("results/%d/%s/%s.json", doc.UserID, doc.ID, eventID)
+	if err := s.objects.Put(ctx, resultKey, bytes.NewReader(resultBytes), "application/json"); err != nil {
+		s.finalizeTextFailure(ctx, doc, fmt.Sprintf("store extracted PDF text: %v", err))
+		return
+	}
+	expiresAt := time.Now().Add(s.resultTTL)
+	terminalDoc := *doc
+	terminalDoc.Status, terminalDoc.ResultKey, terminalDoc.ResultText, terminalDoc.Result, terminalDoc.ResultExpiresAt = domain.StatusCompleted, resultKey, ocrResult.Text, ocrResult, &expiresAt
+	var event *domain.NotificationEvent
+	if s.notifier != nil {
+		event, err = s.notifier.BuildDocumentEvent(&terminalDoc)
+		if err != nil {
+			s.finalizeTextFailure(ctx, doc, fmt.Sprintf("build text notification: %v", err))
+			return
+		}
+	}
+	if _, err := s.docs.FinalizeAttempt(ctx, domain.DocumentFinalization{
+		DocumentID: doc.ID, AttemptID: doc.AttemptID, TerminalEventID: eventID,
+		Status: domain.StatusCompleted, ResultKey: resultKey, ResultText: ocrResult.Text, ResultExpiresAt: &expiresAt,
+	}, event); err != nil {
+		s.logger.Error("finalize extracted PDF text failed", "docID", doc.ID, "error", err)
+		return
+	}
+	if s.results != nil {
+		if err := s.results.SetResult(ctx, doc.ID, ocrResult, s.resultTTL); err != nil {
+			s.logger.Error("cache extracted PDF text failed", "docID", doc.ID, "error", err)
+		}
+	}
+	if s.notifier != nil {
+		if err := s.notifier.PublishDocument(ctx, &terminalDoc); err != nil {
+			s.logger.Error("publish extracted PDF text event failed", "docID", doc.ID, "error", err)
+		}
+	}
+	s.Wake()
+}
+
+func (s *Scheduler) finalizeTextFailure(ctx context.Context, doc *domain.Document, detail string) {
+	terminalDoc := *doc
+	terminalDoc.Status, terminalDoc.ErrorDetail = domain.StatusFailed, detail
+	var event *domain.NotificationEvent
+	var err error
+	if s.notifier != nil {
+		event, err = s.notifier.BuildDocumentEvent(&terminalDoc)
+		if err != nil {
+			s.logger.Error("build text failure notification failed", "docID", doc.ID, "error", err)
+			return
+		}
+	}
+	if _, err = s.docs.FinalizeAttempt(ctx, domain.DocumentFinalization{
+		DocumentID: doc.ID, AttemptID: doc.AttemptID, TerminalEventID: "evt_text_failed_" + strings.TrimPrefix(doc.AttemptID, "att_text_"),
+		Status: domain.StatusFailed, ErrorDetail: detail,
+	}, event); err != nil {
+		s.logger.Error("finalize PDF text failure failed", "docID", doc.ID, "error", err)
+		return
+	}
+	if s.notifier != nil {
+		if err := s.notifier.PublishDocument(ctx, &terminalDoc); err != nil {
+			s.logger.Error("publish PDF text failure event failed", "docID", doc.ID, "error", err)
+		}
+	}
+	s.Wake()
 }
 
 func (s *Scheduler) retryOrFail(ctx context.Context, doc *domain.Document, terminalDetail string) {

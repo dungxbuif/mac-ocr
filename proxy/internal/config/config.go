@@ -40,6 +40,8 @@ type Config struct {
 	NotificationTTL           time.Duration `env:"NOTIFICATION_TTL" envDefault:"2160h" validate:"gt=0"`
 	ProcessingLease           time.Duration `env:"PROCESSING_LEASE" envDefault:"15m" validate:"gt=0"`
 	ProcessingMaxAttempts     int           `env:"PROCESSING_MAX_ATTEMPTS" envDefault:"3" validate:"gte=1,lte=20"`
+	PDFInspectorBin           string        `env:"PDF_INSPECTOR_BIN" envDefault:"/usr/local/bin/pdf2md"`
+	PDFInspectorTimeout       time.Duration `env:"PDF_INSPECTOR_TIMEOUT" envDefault:"10m" validate:"gt=0"`
 
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
 }

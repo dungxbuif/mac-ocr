@@ -441,6 +441,38 @@ func (r *DocumentRepository) ClaimNext(ctx context.Context, attemptID string, le
 	return r.GetByID(ctx, id)
 }
 
+// ClaimNextForText claims a PDF that may be completed by the proxy text
+// extractor. It deliberately ignores native worker capacity.
+func (r *DocumentRepository) ClaimNextForText(ctx context.Context, attemptID string, lease time.Duration, maxAttempts int) (*domain.Document, error) {
+	if attemptID == "" || lease <= 0 || maxAttempts <= 0 {
+		return nil, domain.ErrBadParamInput
+	}
+	var id string
+	err := r.pool.QueryRow(ctx,
+		`UPDATE documents
+		 SET status = 'processing', attempt_id=$1, attempt_count=attempt_count+1,
+		     processing_until=$2, error_detail=NULL, updated_at=now()
+		 WHERE id = (
+		     SELECT id FROM documents
+		     WHERE input_content_type='application/pdf'
+		       AND COALESCE(NULLIF(options_json->>'processingMode',''), 'auto') IN ('auto','text')
+		       AND (status = 'queued'
+		        OR (status='processing' AND processing_until <= now() AND attempt_count < $3))
+		     ORDER BY CASE WHEN status='queued' THEN 0 ELSE 1 END, created_at ASC
+		     FOR UPDATE SKIP LOCKED
+		     LIMIT 1
+		 )
+		 RETURNING id`, attemptID, time.Now().Add(lease), maxAttempts,
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim next text PDF: %w", err)
+	}
+	return r.GetByID(ctx, id)
+}
+
 // ClaimNextWithinCapacity claims the oldest runnable document whose media-type
 // weight fits the native worker's current available units. Keeping this filter
 // in the row-locking query prevents a large PDF at the head of the queue from

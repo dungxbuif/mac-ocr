@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,7 +22,7 @@ type ScanHandler struct {
 }
 
 func NewScanHandler(svc *document.Service, apiBaseURL string) *ScanHandler {
-	return &ScanHandler{svc: svc, apiBaseURL: apiBaseURL}
+	return &ScanHandler{svc: svc, apiBaseURL: strings.TrimRight(apiBaseURL, "/")}
 }
 
 type submitScanJSONReq struct {

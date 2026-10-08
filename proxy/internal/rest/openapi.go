@@ -41,6 +41,7 @@ func buildOpenAPISpec() gin.H {
 		"servers":      []gin.H{{"url": "/", "description": "Current server"}},
 		"tags": []gin.H{
 			{"name": "Documents", "description": "Submit and retrieve independent OCR documents."},
+			{"name": "Scans", "description": "Submit images for perspective correction and image enhancement without OCR."},
 			{"name": "Uploads", "description": "Create authenticated presigned upload URLs for large inputs."},
 			{"name": "Notifications", "description": "Receive durable terminal document events."},
 			{"name": "MCP", "description": "Model Context Protocol endpoint for agents."},
@@ -67,6 +68,24 @@ func buildOpenAPISpec() gin.H {
 					"200": jsonResponse("Current state; completed documents include result until expiry", document),
 					"304": gin.H{"description": "Not modified"}, "401": problemResponse("Invalid or missing API key", problem),
 					"404": problemResponse("Document not found", problem), "410": problemResponse("OCR result has expired", problem),
+				})),
+			},
+			"/v1/scans": gin.H{
+				"post": secured(operationWithBody("Submit an image scan", "Scans", refSchema("ScanSubmission"), gin.H{
+					"202": jsonResponse("Scan accepted", refSchema("ScanReceipt")),
+					"400": problemResponse("Invalid input or unsupported scan fields", problem),
+					"401": problemResponse("Invalid or missing API key", problem),
+					"413": problemResponse("HTTP envelope or image content exceeds its safety limit", problem),
+					"415": problemResponse("Only application/json and supported image bytes are accepted", problem),
+				})),
+			},
+			"/v1/scans/{scanId}": gin.H{
+				"get": secured(operation("Get scan status and enhanced image URL", "Scans", []gin.H{scanIDParameter()}, gin.H{
+					"200": jsonResponse("Current scan state; completed scans include a short-lived download URL", refSchema("ScanStatus")),
+					"400": problemResponse("Invalid scan ID", problem),
+					"401": problemResponse("Invalid or missing API key", problem),
+					"404": problemResponse("Scan not found", problem),
+					"410": problemResponse("Scan result has expired", problem),
 				})),
 			},
 			"/v1/batches": gin.H{"post": secured(operationWithBody("Submit 1-100 independent documents", "Documents", gin.H{
@@ -128,8 +147,26 @@ func openAPISchemas() gin.H {
 			"mode":          gin.H{"type": "string", "enum": []string{"queue", "wait"}, "default": "queue", "description": "queue returns immediately with 202; wait holds the request for a bounded terminal result."},
 			"waitTimeoutMs": gin.H{"type": "integer", "minimum": 1000, "maximum": 30000, "default": 15000, "description": "Maximum wait time for mode=wait. The server caps this at 30 seconds."},
 		}},
+		"ScanSubmission": gin.H{"type": "object", "additionalProperties": false, "required": []string{"input"}, "properties": gin.H{
+			"input":        refSchema("Input"),
+			"notification": refSchema("Notification"),
+		}},
 		"SubmissionReceipt": gin.H{"type": "object", "required": []string{"documentId", "status", "createdAt"}, "properties": gin.H{
 			"documentId": gin.H{"type": "string", "examples": []string{"doc_..."}}, "status": gin.H{"const": "queued"}, "createdAt": gin.H{"type": "string", "format": "date-time"}, "links": linksSchema(),
+		}},
+		"ScanReceipt": gin.H{"type": "object", "required": []string{"scanId", "status", "createdAt"}, "properties": gin.H{
+			"scanId":    gin.H{"type": "string", "pattern": `^scan_[A-Za-z0-9_-]{1,80}$`},
+			"status":    gin.H{"const": "queued"},
+			"createdAt": gin.H{"type": "string", "format": "date-time"},
+		}},
+		"ScanStatus": gin.H{"type": "object", "required": []string{"scanId", "status", "createdAt", "updatedAt"}, "properties": gin.H{
+			"scanId":               gin.H{"type": "string", "pattern": `^scan_[A-Za-z0-9_-]{1,80}$`},
+			"status":               statusSchema(),
+			"createdAt":            gin.H{"type": "string", "format": "date-time"},
+			"updatedAt":            gin.H{"type": "string", "format": "date-time"},
+			"downloadUrl":          gin.H{"type": "string", "format": "uri", "description": "Short-lived presigned GET URL for the enhanced JPEG; present only when completed."},
+			"downloadUrlExpiresAt": gin.H{"type": "string", "format": "date-time", "description": "Expiry of downloadUrl."},
+			"errorDetail":          gin.H{"type": "string"},
 		}},
 		"BatchReceipt": gin.H{"type": "object", "required": []string{"status", "summary", "items"}, "properties": gin.H{
 			"status": gin.H{"const": "accepted"}, "summary": gin.H{"type": "object", "properties": gin.H{"total": integerSchema(), "accepted": integerSchema(), "rejected": integerSchema()}},
@@ -263,4 +300,7 @@ func linksSchema() gin.H {
 }
 func documentIDParameter() gin.H {
 	return gin.H{"name": "documentId", "in": "path", "required": true, "schema": gin.H{"type": "string"}}
+}
+func scanIDParameter() gin.H {
+	return gin.H{"name": "scanId", "in": "path", "required": true, "schema": gin.H{"type": "string", "pattern": `^scan_[A-Za-z0-9_-]{1,80}$`}}
 }

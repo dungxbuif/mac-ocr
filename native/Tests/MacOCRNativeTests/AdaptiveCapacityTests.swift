@@ -22,8 +22,22 @@ private final class MutableResourceProbe: NativeResourceProbing, @unchecked Send
 }
 
 final class AdaptiveCapacityTests: XCTestCase {
+	func testDefaultPolicyUsesOperatorLimitWithoutAdaptiveGating() {
+		let gib = UInt64(1024 * 1024 * 1024)
+		let policy = NativeAdaptiveConcurrencyPolicy()
+		let snapshot = NativeResourceSnapshot(
+			processorCount: 8,
+			physicalMemoryBytes: 16 * gib,
+			availableMemoryBytes: 2 * gib,
+			thermalPressure: .nominal
+		)
+
+		XCTAssertFalse(policy.enabled)
+		XCTAssertEqual(policy.decision(operatorLimit: 6, snapshot: snapshot).limit, 6)
+	}
+
 	func testCoreReserveCanPauseAResourceConstrainedNode() {
-		let policy = NativeAdaptiveConcurrencyPolicy(reserveCores: 2)
+		let policy = NativeAdaptiveConcurrencyPolicy(enabled: true, reserveCores: 2)
 		let snapshot = NativeResourceSnapshot(
 			processorCount: 2,
 			physicalMemoryBytes: 32 * 1024 * 1024 * 1024,
@@ -39,7 +53,7 @@ final class AdaptiveCapacityTests: XCTestCase {
 
     func testPDFUsesWeightedUnitsAndCeiling() async {
         let snapshot = NativeResourceSnapshot(processorCount: 12, physicalMemoryBytes: 48 * gib, availableMemoryBytes: 20 * gib, thermalPressure: .nominal)
-        let policy = NativeAdaptiveConcurrencyPolicy(reserveCores: 2, reserveMemoryBytes: 10 * gib, memoryPerUnitBytes: 2 * gib, imageJobUnits: 1, pdfJobUnits: 3, recoverySamples: 3)
+        let policy = NativeAdaptiveConcurrencyPolicy(enabled: true, reserveCores: 2, reserveMemoryBytes: 10 * gib, memoryPerUnitBytes: 2 * gib, imageJobUnits: 1, pdfJobUnits: 3, recoverySamples: 3)
         let state = NativeWorkerState(operatorLimit: 6, authSecret: "secret", nodeId: "test", adaptivePolicy: policy, resourceProbe: MutableResourceProbe(snapshot))
 
         var capacity = await state.getCapacity()
@@ -60,7 +74,7 @@ final class AdaptiveCapacityTests: XCTestCase {
     func testPressureDropsImmediatelyAndRecoveryUsesHysteresis() async {
         let healthy = NativeResourceSnapshot(processorCount: 12, physicalMemoryBytes: 48 * gib, availableMemoryBytes: 20 * gib, thermalPressure: .nominal)
         let probe = MutableResourceProbe(healthy)
-        let policy = NativeAdaptiveConcurrencyPolicy(reserveCores: 2, reserveMemoryBytes: 10 * gib, memoryPerUnitBytes: 2 * gib, recoverySamples: 3)
+        let policy = NativeAdaptiveConcurrencyPolicy(enabled: true, reserveCores: 2, reserveMemoryBytes: 10 * gib, memoryPerUnitBytes: 2 * gib, recoverySamples: 3)
         let state = NativeWorkerState(operatorLimit: 6, authSecret: "secret", nodeId: "test", adaptivePolicy: policy, resourceProbe: probe)
         var capacity = await state.getCapacity()
         XCTAssertEqual(capacity.effectiveLimit, 5)
@@ -79,7 +93,7 @@ final class AdaptiveCapacityTests: XCTestCase {
     }
 
     func testOperatorCeilingAndCriticalThermalPressureWin() {
-        let policy = NativeAdaptiveConcurrencyPolicy(reserveCores: 2, reserveMemoryBytes: 10 * gib, memoryPerUnitBytes: 2 * gib)
+        let policy = NativeAdaptiveConcurrencyPolicy(enabled: true, reserveCores: 2, reserveMemoryBytes: 10 * gib, memoryPerUnitBytes: 2 * gib)
         let nominal = NativeResourceSnapshot(processorCount: 12, physicalMemoryBytes: 48 * gib, availableMemoryBytes: 30 * gib, thermalPressure: .nominal)
         XCTAssertEqual(policy.decision(operatorLimit: 2, snapshot: nominal).limit, 2)
         let critical = NativeResourceSnapshot(processorCount: 12, physicalMemoryBytes: 48 * gib, availableMemoryBytes: 30 * gib, thermalPressure: .critical)

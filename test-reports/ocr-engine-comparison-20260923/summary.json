@@ -1,0 +1,283 @@
+{
+  "createdAt": "2026-09-23T15:07:27Z",
+  "versions": {
+    "python": "3.12.9",
+    "paddle": "3.3.1",
+    "paddleocr": "3.7.0",
+    "tesseract": "tesseract 5.5.3"
+  },
+  "fixtures": [
+    {
+      "name": "vietnamese-fixture",
+      "kind": "generated-vietnamese",
+      "path": "/Users/dungxbuif/workspace/mac-ocr/test-reports/ocr-engine-comparison-20260923/vietnamese-fixture.png"
+    },
+    {
+      "name": "eurotext",
+      "kind": "english-text",
+      "path": "/Users/dungxbuif/workspace/mac-ocr/test-reports/production-uat-20260815/dataset/eurotext.png"
+    },
+    {
+      "name": "cord-validation-000",
+      "kind": "receipt",
+      "path": "/Users/dungxbuif/workspace/mac-ocr/test-reports/production-uat-20260815/dataset/cord-validation-000.png"
+    },
+    {
+      "name": "cord-validation-007",
+      "kind": "receipt",
+      "path": "/Users/dungxbuif/workspace/mac-ocr/test-reports/production-uat-20260815/dataset/cord-validation-007.png"
+    }
+  ],
+  "summary": {
+    "paddleocr-3.7.0-vi-default": {
+      "avgSeconds": 3.68,
+      "avgRecall": 0.8747,
+      "avgPrecision": 0.6889
+    },
+    "paddleocr-3.7.0-vi-fast-no-orient-unwarp": {
+      "avgSeconds": 4.0834,
+      "avgRecall": 0.8747,
+      "avgPrecision": 0.7171
+    },
+    "tesseract-5.5.3-vie+eng-psm6": {
+      "avgSeconds": 0.3653,
+      "avgRecall": 0.6264,
+      "avgPrecision": 0.5811
+    },
+    "macocr-apple-vision-prod": {
+      "avgSeconds": 1.3012,
+      "avgRecall": 0.976,
+      "avgPrecision": 0.8035
+    }
+  },
+  "rows": [
+    {
+      "fixture": "vietnamese-fixture",
+      "kind": "generated-vietnamese",
+      "engine": "paddleocr-3.7.0-vi-default",
+      "seconds": 3.4328,
+      "metrics": {
+        "expectedTokens": 37,
+        "actualTokens": 37,
+        "matchedTokens": 21,
+        "tokenRecall": 0.5676,
+        "tokenPrecision": 0.5676
+      },
+      "textPreview": "hóa đon bán hàng ca hàng cà phê sài gòn ngày 23 09 2026 tng tiên 185 000 đông cm ơn quý khách và hn gp li ting vit có du hoa hông công ngh d liu"
+    },
+    {
+      "fixture": "vietnamese-fixture",
+      "kind": "generated-vietnamese",
+      "engine": "paddleocr-3.7.0-vi-fast-no-orient-unwarp",
+      "seconds": 4.0418,
+      "metrics": {
+        "expectedTokens": 37,
+        "actualTokens": 37,
+        "matchedTokens": 21,
+        "tokenRecall": 0.5676,
+        "tokenPrecision": 0.5676
+      },
+      "textPreview": "hóa đon bán hàng ca hàng cà phê sài gòn ngày 23 09 2026 tng tiên 185 000 đông cm ơn quý khách và hn gp li ting vit có du hoa hông công ngh d liu"
+    },
+    {
+      "fixture": "vietnamese-fixture",
+      "kind": "generated-vietnamese",
+      "engine": "tesseract-5.5.3-vie+eng-psm6",
+      "seconds": 0.3158,
+      "metrics": {
+        "expectedTokens": 37,
+        "actualTokens": 37,
+        "matchedTokens": 37,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 1.0
+      },
+      "textPreview": "hóa đơn bán hàng cửa hàng cà phê sài gòn ngày 23 09 2026 tổng tiền 185 000 đồng cảm ơn quý khách và hẹn gặp lại tiếng việt có dấu hoa hồng công nghệ dữ liệu"
+    },
+    {
+      "fixture": "vietnamese-fixture",
+      "kind": "generated-vietnamese",
+      "engine": "macocr-apple-vision-prod",
+      "seconds": 1.1538,
+      "metrics": {
+        "expectedTokens": 37,
+        "actualTokens": 37,
+        "matchedTokens": 36,
+        "tokenRecall": 0.973,
+        "tokenPrecision": 0.973
+      },
+      "textPreview": "hóa đơn bán hàng cứa hàng cà phê sài gòn ngày 23 09 2026 tổng tiền 185 000 đồng cảm ơn quý khách và hẹn gặp lại tiếng việt có dấu hoa hồng công nghệ dữ liệu",
+      "documentId": "doc_1a0cece4dd4bd2c8c107142"
+    },
+    {
+      "fixture": "eurotext",
+      "kind": "english-text",
+      "engine": "paddleocr-3.7.0-vi-default",
+      "seconds": 4.3899,
+      "metrics": {
+        "expectedTokens": 27,
+        "actualTokens": 73,
+        "matchedTokens": 27,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 0.3699
+      },
+      "textPreview": "the quick brown fox jumps over the 43 456 78 lazy 90 dog duck goose as 12 5 of e mail from aspammer website com is spam der schnelle braune fuchs springt über den faulen hund le renard brun rapide saute par dessus le chien paresseux la volpe marrone rapida salta sopra il cane pigro el zorro marrón r"
+    },
+    {
+      "fixture": "eurotext",
+      "kind": "english-text",
+      "engine": "paddleocr-3.7.0-vi-fast-no-orient-unwarp",
+      "seconds": 4.6007,
+      "metrics": {
+        "expectedTokens": 27,
+        "actualTokens": 73,
+        "matchedTokens": 27,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 0.3699
+      },
+      "textPreview": "the quick brown fox jumps over the 43 456 78 lazy 90 dog duck goose as 12 5 of e mail from aspammer website com is spam der schnelle braune fuchs springt über den faulen hund le renard brun rapide saute par dessus le chien paresseux la volpe marrone rapida salta sopra il cane pigro el zorro marrón r"
+    },
+    {
+      "fixture": "eurotext",
+      "kind": "english-text",
+      "engine": "tesseract-5.5.3-vie+eng-psm6",
+      "seconds": 0.4144,
+      "metrics": {
+        "expectedTokens": 27,
+        "actualTokens": 73,
+        "matchedTokens": 27,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 0.3699
+      },
+      "textPreview": "the quick brown fox jumps over the 43 456 78 lazy 90 dog duck goose as 12 5 of e mail from aspammer website com is spam der schnelle braune fuchs springt iiber den faulen hund le renard brun rapide saute par dessus le chien paresseux la volpe marrone rapida salta sopra il cane pigro el zorro marron "
+    },
+    {
+      "fixture": "eurotext",
+      "kind": "english-text",
+      "engine": "macocr-apple-vision-prod",
+      "seconds": 1.4979,
+      "metrics": {
+        "expectedTokens": 27,
+        "actualTokens": 73,
+        "matchedTokens": 27,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 0.3699
+      },
+      "textPreview": "the quick brown fox jumps over the 43 456 78 lazy 90 dog duck goose as 12 5 of e mail from aspammer website com is spam der schnelle braune fuchs springt über den faulen hund le renard brun rapide saute par dessus le chien paresseux la volpe marrone rapida salta sopra il cane pigro el zorro marrón r",
+      "documentId": "doc_1a0cece76e06f7c2f1e9c64"
+    },
+    {
+      "fixture": "cord-validation-000",
+      "kind": "receipt",
+      "engine": "paddleocr-3.7.0-vi-default",
+      "seconds": 3.5066,
+      "metrics": {
+        "expectedTokens": 24,
+        "actualTokens": 24,
+        "matchedTokens": 24,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 1.0
+      },
+      "textPreview": "1 real ganache 16 500 1 egg tart 13 000 1 pizza toast 16 000 total 45 500 cash 50 000 change 4 500"
+    },
+    {
+      "fixture": "cord-validation-000",
+      "kind": "receipt",
+      "engine": "paddleocr-3.7.0-vi-fast-no-orient-unwarp",
+      "seconds": 3.5885,
+      "metrics": {
+        "expectedTokens": 24,
+        "actualTokens": 24,
+        "matchedTokens": 24,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 1.0
+      },
+      "textPreview": "1 real ganache 16 500 1 egg tart 13 000 1 pizza toast 16 000 total 45 500 cash 50 000 change 4 500"
+    },
+    {
+      "fixture": "cord-validation-000",
+      "kind": "receipt",
+      "engine": "tesseract-5.5.3-vie+eng-psm6",
+      "seconds": 0.3798,
+      "metrics": {
+        "expectedTokens": 24,
+        "actualTokens": 16,
+        "matchedTokens": 8,
+        "tokenRecall": 0.3333,
+        "tokenPrecision": 0.5
+      },
+      "textPreview": "none ie eee í ma ga 13 000 16 000 45 500 90 000 4 900"
+    },
+    {
+      "fixture": "cord-validation-000",
+      "kind": "receipt",
+      "engine": "macocr-apple-vision-prod",
+      "seconds": 1.4505,
+      "metrics": {
+        "expectedTokens": 24,
+        "actualTokens": 24,
+        "matchedTokens": 24,
+        "tokenRecall": 1.0,
+        "tokenPrecision": 1.0
+      },
+      "textPreview": "1 real ganache 1 egg tart 1 pizza toast total cash change 16 500 13 000 16 000 45 500 50 000 4 500",
+      "documentId": "doc_1a0cece99bf4e19b295d7bb"
+    },
+    {
+      "fixture": "cord-validation-007",
+      "kind": "receipt",
+      "engine": "paddleocr-3.7.0-vi-default",
+      "seconds": 3.3906,
+      "metrics": {
+        "expectedTokens": 29,
+        "actualTokens": 33,
+        "matchedTokens": 27,
+        "tokenRecall": 0.931,
+        "tokenPrecision": 0.8182
+      },
+      "textPreview": "r 信0其信 40 500 change 2000 001 cash 59 500 total 5 409 pb1 9 545 discount 63 636 subtotal 9 545 63 636 cp 360 club card choco devil 4 d dtrepes"
+    },
+    {
+      "fixture": "cord-validation-007",
+      "kind": "receipt",
+      "engine": "paddleocr-3.7.0-vi-fast-no-orient-unwarp",
+      "seconds": 4.1025,
+      "metrics": {
+        "expectedTokens": 29,
+        "actualTokens": 29,
+        "matchedTokens": 27,
+        "tokenRecall": 0.931,
+        "tokenPrecision": 0.931
+      },
+      "textPreview": "dore choco devil 63 636 cp 360 club card 9 545 subtotal 63 636 discount 9 545 pb1 5 409 59 500 total 100 0000 cash 40 500 change"
+    },
+    {
+      "fixture": "cord-validation-007",
+      "kind": "receipt",
+      "engine": "tesseract-5.5.3-vie+eng-psm6",
+      "seconds": 0.3511,
+      "metrics": {
+        "expectedTokens": 29,
+        "actualTokens": 11,
+        "matchedTokens": 5,
+        "tokenRecall": 0.1724,
+        "tokenPrecision": 0.4545
+      },
+      "textPreview": "4 choco devil trea iole ls cash change yes 2xnxnnme ay"
+    },
+    {
+      "fixture": "cord-validation-007",
+      "kind": "receipt",
+      "engine": "macocr-apple-vision-prod",
+      "seconds": 1.1027,
+      "metrics": {
+        "expectedTokens": 29,
+        "actualTokens": 31,
+        "matchedTokens": 27,
+        "tokenRecall": 0.931,
+        "tokenPrecision": 0.871
+      },
+      "textPreview": "4 choco devil cp 360 club card subtotal discount pb1 total cash change r dorepes 63 630 9 545 63 636 9 545 5 409 59 500 100 000đ 40 500",
+      "documentId": "doc_1a0cecebe4af0e790627599"
+    }
+  ]
+}

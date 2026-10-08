@@ -11,6 +11,7 @@ import (
 
 	"macocr/proxy/domain"
 	"macocr/proxy/internal/native"
+	"macocr/proxy/internal/pdfinspector"
 	"macocr/proxy/internal/usecase/auth"
 )
 
@@ -71,6 +72,12 @@ func (r *schedulerDocRepo) ClaimNext(_ context.Context, attemptID string, lease 
 	r.doc.ProcessingUntil = &until
 	return r.doc, nil
 }
+func (r *schedulerDocRepo) ClaimNextForText(ctx context.Context, attemptID string, lease time.Duration, maxAttempts int) (*domain.Document, error) {
+	if r.doc == nil || r.doc.InputContentType != "application/pdf" || r.doc.Options == nil || (r.doc.Options.ProcessingMode != "auto" && r.doc.Options.ProcessingMode != "text") {
+		return nil, nil
+	}
+	return r.ClaimNext(ctx, attemptID, lease, maxAttempts)
+}
 func (r *schedulerDocRepo) RequeueAttempt(context.Context, string, string) error {
 	r.requeued++
 	r.doc.Status, r.doc.AttemptID, r.doc.ProcessingUntil = domain.StatusQueued, "", nil
@@ -85,7 +92,9 @@ func (r *schedulerDocRepo) ReleaseAttempt(context.Context, string, string) error
 func (r *schedulerDocRepo) ListExhaustedAttempts(context.Context, time.Time, int, int) ([]domain.Document, error) {
 	return nil, nil
 }
-func (r *schedulerDocRepo) FinalizeAttempt(context.Context, domain.DocumentFinalization, *domain.NotificationEvent) (*domain.Document, error) {
+func (r *schedulerDocRepo) FinalizeAttempt(_ context.Context, f domain.DocumentFinalization, _ *domain.NotificationEvent) (*domain.Document, error) {
+	r.doc.Status, r.doc.ResultText, r.doc.ResultKey, r.doc.ErrorDetail = f.Status, f.ResultText, f.ResultKey, f.ErrorDetail
+	r.doc.ProcessingUntil = nil
 	return r.doc, nil
 }
 func (r *schedulerDocRepo) CountByStatus(context.Context, *int64) (map[domain.DocumentStatus]int64, error) {
@@ -125,6 +134,30 @@ func (o schedulerObjects) PresignGetURL(context.Context, string, time.Duration) 
 }
 func (o schedulerObjects) Delete(context.Context, string) error { return nil }
 func (o schedulerObjects) Ping(context.Context) error           { return nil }
+
+type schedulerTextProcessor struct{ result pdfinspector.Result }
+
+func (p schedulerTextProcessor) Extract(context.Context, *domain.Document) (pdfinspector.Result, error) {
+	return p.result, nil
+}
+
+func TestPDFTextClaimRunsWithoutNativeCapacity(t *testing.T) {
+	repo := &schedulerDocRepo{doc: &domain.Document{ID: "doc_text", UserID: 1, Status: domain.StatusQueued, InputKey: "input", InputContentType: "application/pdf", Options: &domain.OCROptions{ProcessingMode: "auto"}}}
+	nativeClient := native.NewClientWithHTTPClient("http://worker.test", "secret", &http.Client{Transport: schedulerRoundTrip(func(*http.Request) (*http.Response, error) {
+		t.Fatal("native capacity should not be queried for a text PDF")
+		return nil, nil
+	})})
+	s := New(repo, schedulerObjects{}, nativeClient, auth.NewService(nil, nil, nil, nil), "https://proxy.test/webhooks/native/events", slog.New(slog.NewTextHandler(io.Discard, nil)), time.Minute, 3)
+	s.SetPDFTextProcessor(schedulerTextProcessor{result: pdfinspector.Result{PDFType: "text_based", PageCount: 1, Markdown: "hello"}})
+	s.pollAndDispatch(context.Background())
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && repo.doc.Status == domain.StatusProcessing {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if repo.doc.Status != domain.StatusCompleted || repo.doc.ResultText != "hello" {
+		t.Fatalf("text PDF did not complete without native capacity: status=%s text=%q", repo.doc.Status, repo.doc.ResultText)
+	}
+}
 
 func TestBusyWorkerReleasesAttemptWithoutConsumingRetry(t *testing.T) {
 	httpClient := &http.Client{Transport: schedulerRoundTrip(func(request *http.Request) (*http.Response, error) {

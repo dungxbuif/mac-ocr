@@ -215,7 +215,7 @@ func inputSchema() gin.H {
 }
 
 func ocrOptionsSchema() gin.H {
-	return gin.H{"type": "object", "additionalProperties": false, "properties": gin.H{"recognitionLevel": gin.H{"type": "string", "enum": []string{"fast", "accurate"}, "default": "accurate"}, "languages": gin.H{"type": "array", "items": gin.H{"type": "string"}, "default": []string{"vi-VN", "en-US"}}, "automaticallyDetectsLanguage": gin.H{"type": "boolean", "default": true}, "usesLanguageCorrection": gin.H{"type": "boolean", "default": true}, "customWords": gin.H{"type": "array", "items": gin.H{"type": "string"}, "default": []string{}}, "minimumTextHeight": gin.H{"type": "number", "minimum": 0, "maximum": 1, "default": 0}}}
+	return gin.H{"type": "object", "additionalProperties": false, "properties": gin.H{"processingMode": gin.H{"type": "string", "enum": []string{"auto", "text", "ocr"}, "default": "auto", "description": "PDF routing: extract native text in the proxy, require text, or force Mac OCR."}, "recognitionLevel": gin.H{"type": "string", "enum": []string{"fast", "accurate"}, "default": "accurate"}, "languages": gin.H{"type": "array", "items": gin.H{"type": "string"}, "default": []string{"vi-VN", "en-US"}}, "automaticallyDetectsLanguage": gin.H{"type": "boolean", "default": true}, "usesLanguageCorrection": gin.H{"type": "boolean", "default": true}, "customWords": gin.H{"type": "array", "items": gin.H{"type": "string"}, "default": []string{}}, "minimumTextHeight": gin.H{"type": "number", "minimum": 0, "maximum": 1, "default": 0}}}
 }
 
 type mcpToolCall struct {

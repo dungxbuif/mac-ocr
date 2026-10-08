@@ -11,6 +11,7 @@ import (
 	"macocr/proxy/internal/config"
 	"macocr/proxy/internal/native"
 	"macocr/proxy/internal/notifications"
+	"macocr/proxy/internal/pdfinspector"
 	pgrepo "macocr/proxy/internal/repository/postgres"
 	redisrepo "macocr/proxy/internal/repository/redis"
 	s3repo "macocr/proxy/internal/repository/s3"
@@ -104,6 +105,8 @@ func main() {
 	callbackURL := fmt.Sprintf("%s/webhooks/native/events", cfg.PublicAPIBaseURL)
 
 	sched := scheduler.New(docRepo, objRepo, nativeClient, authSvc, callbackURL, logger, cfg.ProcessingLease, cfg.ProcessingMaxAttempts, notificationSvc)
+	sched.SetPDFTextProcessor(pdfinspector.NewCommandProcessor(cfg.PDFInspectorBin, objRepo, cfg.PDFInspectorTimeout))
+	sched.SetResultCache(redisRepo, cfg.ResultTTL)
 	if workerHub != nil {
 		workerHub.SetLease(cfg.ProcessingLease)
 		workerHub.SetWake(sched.Wake)

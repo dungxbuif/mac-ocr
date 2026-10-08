@@ -6,7 +6,7 @@
 
 - Manually shared Universal Mac app connects to production over WSS from LAN or Internet. No per-Mac OCR tunnel or local HTTP port is required. The existing OCR and scan APIs remain compatible.
 - The app retains its compact status and capacity card, logs, Launch at Login, quit action and on/off switch. Endpoint, connection controls, shared authentication key, node identity and machine metadata are hidden from users; operational settings are set in the private build.
-- Administrator-only React Workers page keeps machine details expanded, shows one effective node status, capacity and recent job routing, with pause, resume, drain and revoke controls. User Management and Workers/Routing APIs and UI remain inaccessible to ordinary accounts.
+- Administrator-only React Workers page keeps machine details expanded, shows one effective node status, capacity and recent job routing, with pause, resume, drain, revoke, and activate controls. Activate clears a deliberate node revoke while preserving its identity so the same shared-key Mac can reconnect. User Management and Workers/Routing APIs and UI remain inaccessible to ordinary accounts.
 - Admin navigation now uses stable routes for Users, Workers, and API Keys, including direct-load and browser back/forward support.
 - Manual artifacts are `Mac-OCR-Native-2.0.0-universal.dmg`, `Mac-OCR-Native-2.0.0-universal.zip`, and the unpacked app bundle. Build 7 is ad-hoc signed, requires macOS 13+, and contains both `arm64` and `x86_64` slices.
 - Control messages travel over WSS; large inputs and scan outputs use HTTPS. Existing 100 MiB file limits and macOS 13 minimum remain. Release includes arm64 and x86_64; live hardware acceptance used the local Apple Silicon Mac.

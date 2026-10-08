@@ -70,6 +70,13 @@ func (s *testWorkerStore) Revoke(context.Context, string) error {
 	s.mu.Unlock()
 	return nil
 }
+func (s *testWorkerStore) Activate(context.Context, string) error {
+	s.mu.Lock()
+	s.revoked = false
+	s.control = "resume"
+	s.mu.Unlock()
+	return nil
+}
 func (s *testWorkerStore) Assign(_ context.Context, r WorkerRoute) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -167,6 +174,12 @@ func TestSocketDispatchAndRevoke(t *testing.T) {
 	}
 	if h.Authenticate(context.Background(), "node_123", "secret") {
 		t.Fatal("revoked credential accepted")
+	}
+	if err := h.Control(context.Background(), "node_123", "activate"); err != nil {
+		t.Fatalf("activate revoked node: %v", err)
+	}
+	if !h.Authenticate(context.Background(), "node_123", "secret") {
+		t.Fatal("activated node credential rejected")
 	}
 }
 func TestUnknownACKRetainsReservationUntilLease(t *testing.T) {

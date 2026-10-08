@@ -28,7 +28,7 @@ const (
 	MaxImagePixels      = 40_000_000
 	MaxCustomWordBytes  = 128
 	MaxCustomWordsBytes = 8 * 1024
-	MaxPDFPages         = 200
+	MaxPDFPages         = 1000
 )
 
 var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$`)
@@ -165,6 +165,7 @@ func ValidateOptions(opts *domain.OCROptions) (*domain.OCROptions, error) {
 	defaultTrue := true
 	if opts == nil {
 		return &domain.OCROptions{
+			ProcessingMode:               "auto",
 			RecognitionLevel:             "accurate",
 			Languages:                    []string{"vi-VN", "en-US"},
 			AutomaticallyDetectsLanguage: &defaultTrue,
@@ -173,8 +174,12 @@ func ValidateOptions(opts *domain.OCROptions) (*domain.OCROptions, error) {
 	}
 
 	out := *opts
-	if out.ProcessingMode != "" {
-		return nil, errors.New("processingMode is reserved for internal use")
+	if out.ProcessingMode == "" {
+		out.ProcessingMode = "auto"
+	} else if out.ProcessingMode != "auto" && out.ProcessingMode != "text" && out.ProcessingMode != "ocr" && out.ProcessingMode != "scan" {
+		return nil, errors.New("processingMode must be 'auto', 'text', or 'ocr'")
+	} else if out.ProcessingMode == "scan" {
+		return nil, errors.New("processingMode 'scan' is reserved for the scan API")
 	}
 	if out.Languages == nil {
 		out.Languages = []string{"vi-VN", "en-US"}

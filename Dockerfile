@@ -34,7 +34,15 @@ COPY docs-site/ ./
 COPY docs/ /app/docs/
 RUN npm run build
 
-# Stage 3: Build Go Proxy & Admin CLI
+# Stage 3: Build the pinned Firecrawl PDF text extractor. The default crate
+# build is text-only, so it adds no OCR models or native inference runtime.
+FROM rust:1.98-alpine AS pdf-inspector-builder
+RUN apk add --no-cache git musl-dev
+WORKDIR /src/pdf-inspector
+RUN git clone --depth 1 --branch v1.25.2 https://github.com/firecrawl/pdf-inspector .
+RUN cargo build --release --bin pdf2md
+
+# Stage 4: Build Go Proxy & Admin CLI
 FROM golang:1.26.6-alpine AS go-builder
 RUN apk add --no-cache ca-certificates git
 
@@ -63,7 +71,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
     -ldflags="-w -s -X main.version=${VERSION} -X main.gitCommit=${GIT_COMMIT}" \
     -o /app/bin/macocr-admin ./cmd/admin
 
-# Stage 4: Minimal Runtime Image
+# Stage 5: Minimal Runtime Image
 FROM alpine:3.20 AS runner
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S macocr \
@@ -77,6 +85,7 @@ WORKDIR /app
 
 COPY --from=go-builder /app/bin/macocr-proxy /usr/local/bin/macocr-proxy
 COPY --from=go-builder /app/bin/macocr-admin /usr/local/bin/macocr-admin
+COPY --from=pdf-inspector-builder /src/pdf-inspector/target/release/pdf2md /usr/local/bin/pdf2md
 
 EXPOSE 8080
 

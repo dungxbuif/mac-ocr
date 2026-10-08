@@ -206,8 +206,26 @@ func TestValidateOptionsAppliesBooleanDefaultsWhenOmitted(t *testing.T) {
 	if validated.RecognitionLevel != "accurate" {
 		t.Fatalf("recognitionLevel default should be accurate, got %q", validated.RecognitionLevel)
 	}
+	if validated.ProcessingMode != "auto" {
+		t.Fatalf("processingMode default should be auto, got %q", validated.ProcessingMode)
+	}
 	if !reflect.DeepEqual(validated.Languages, []string{"vi-VN", "en-US"}) {
 		t.Fatalf("languages defaults mismatch: %#v", validated.Languages)
+	}
+}
+
+func TestValidateOptionsPDFProcessingModes(t *testing.T) {
+	for _, mode := range []string{"auto", "text", "ocr"} {
+		validated, err := document.ValidateOptions(&domain.OCROptions{ProcessingMode: mode})
+		if err != nil || validated.ProcessingMode != mode {
+			t.Fatalf("processingMode %q rejected: value=%#v err=%v", mode, validated, err)
+		}
+	}
+	if _, err := document.ValidateOptions(&domain.OCROptions{ProcessingMode: "scan"}); err == nil {
+		t.Fatal("scan should remain reserved for the scan API")
+	}
+	if _, err := document.ValidateOptions(&domain.OCROptions{ProcessingMode: "other"}); err == nil {
+		t.Fatal("unknown processing mode should be rejected")
 	}
 }
 

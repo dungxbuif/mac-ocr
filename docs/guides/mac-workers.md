@@ -19,11 +19,11 @@ Optional enrollment mode is available for administrators who want separate node 
 
 ## Understand status and routing
 
-A connected node may still have zero capacity because it is paused, draining, or its CPU/memory reserve leaves no space for another job. The scheduler considers node capabilities and the weighted cost of images and PDFs before assigning work.
+A connected node may still have zero capacity because it is paused, draining, or all operator slots are occupied. The release leaves adaptive CPU/memory/thermal gating off by default, so transient macOS free-memory readings do not remove all worker capacity. Operators can opt into that protection with `MACOCR_ADAPTIVE_CONCURRENCY=true`; the scheduler always considers node capabilities and the weighted cost of images and PDFs.
 
 The administrator's Workers page always shows the automatic node identity, machine model, local OS username, hostname, macOS version, CPU architecture/core count, RAM, one effective worker status, last heartbeat, app version, resource capacity, and recent routing assignments. These details and controls require an administrator account; ordinary accounts cannot view the roster or routing. Machine metadata remains available when a node goes offline. The app generates its label from its fingerprint and has no custom node-name field or identity panel. Use **Pause** to stop new work, **Resume** to permit new work again, **Drain** before stopping a Mac, and **Revoke** to block a registered node identity. In shared-key mode, revoking one identity does not rotate the common key.
 
-Pause, Drain, and Resume are durable server settings. They survive proxy restarts and are reapplied when a Mac reconnects; they may also be set while a registered Mac is offline.
+Pause, Drain, and Resume are durable server settings. They survive proxy restarts and are reapplied when a Mac reconnects; they may also be set while a registered Mac is offline. If an administrator selects **Revoke**, the node stays blocked after reinstalling the app. Select **Activate** in the Workers dashboard to clear the revoke; the same Mac identity can then reconnect automatically with the shared-key build.
 
 On a network interruption or sleep, a node becomes unavailable for new work. Active attempts follow the server's lease and retry policy. The app reconnects after the network returns. A late result cannot overwrite a different active attempt.
 

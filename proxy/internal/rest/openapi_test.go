@@ -28,9 +28,30 @@ func TestOpenAPIHandlerBuildsRuntimeContract(t *testing.T) {
 	if spec.OpenAPI != "3.1.0" || len(spec.Tools) != 3 {
 		t.Fatalf("runtime schemas are missing: %+v", spec)
 	}
-	for _, path := range []string{"/v1/documents", "/v1/documents/{documentId}", "/v1/batches", "/v1/uploads/presign", "/v1/events", "/mcp"} {
+	for _, path := range []string{"/v1/documents", "/v1/documents/{documentId}", "/v1/scans", "/v1/scans/{scanId}", "/v1/batches", "/v1/uploads/presign", "/v1/events", "/mcp"} {
 		if _, ok := spec.Paths[path]; !ok {
 			t.Fatalf("missing path %s", path)
+		}
+	}
+	var scansPath map[string]json.RawMessage
+	if err := json.Unmarshal(spec.Paths["/v1/scans"], &scansPath); err != nil {
+		t.Fatalf("invalid scans path: %v", err)
+	}
+	var scanPost struct {
+		Security    []map[string][]string `json:"security"`
+		RequestBody struct {
+			Content map[string]json.RawMessage `json:"content"`
+		} `json:"requestBody"`
+	}
+	if err := json.Unmarshal(scansPath["post"], &scanPost); err != nil {
+		t.Fatalf("invalid scan POST operation: %v", err)
+	}
+	if len(scanPost.Security) != 1 || scanPost.RequestBody.Content["application/json"] == nil {
+		t.Fatal("scan submission must be authenticated and accept application/json")
+	}
+	for _, schemaName := range []string{"ScanSubmission", "ScanReceipt", "ScanStatus"} {
+		if _, ok := spec.Components.Schemas[schemaName]; !ok {
+			t.Fatalf("scan schema %s is missing", schemaName)
 		}
 	}
 	if _, exists := spec.Paths["/v1/batches/{batchId}"]; exists {

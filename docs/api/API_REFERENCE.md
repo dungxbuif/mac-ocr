@@ -36,7 +36,7 @@ The Swagger contract describes the public OCR and MCP data plane. Administrator 
 
 ## Worker administration and outbound connections
 
-The **Workers** dashboard manages native Mac installations. `GET /v1/admin/workers` returns `nodes`, `routes`, and `authMode`. The listing and `POST /v1/admin/workers/{nodeId}/control` require an administrator session; mutations also require `X-CSRF-Token`. Shared-key builds automatically register using WSS `/v1/workers/connect` with `Authorization: Bearer <shared secret>` and `X-Native-Node-Id`. HTTPS result callbacks and scan output use the same Bearer credential plus event/node identity headers; assignment and attempt checks still apply.
+The **Workers** dashboard manages native Mac installations. `GET /v1/admin/workers` returns `nodes`, `routes`, and `authMode`. The listing and `POST /v1/admin/workers/{nodeId}/control` require an administrator session; mutations also require `X-CSRF-Token`. Control actions are `pause`, `resume`, `drain`, `revoke`, and `activate`; `activate` clears a deliberate revoke while preserving the node identity and lets a shared-key app reconnect automatically. Shared-key builds automatically register using WSS `/v1/workers/connect` with `Authorization: Bearer <shared secret>` and `X-Native-Node-Id`. Native capacity uses the operator limit by default; adaptive CPU/memory/thermal gating is opt-in with `MACOCR_ADAPTIVE_CONCURRENCY=true`. HTTPS result callbacks and scan output use the same Bearer credential plus event/node identity headers; assignment and attempt checks still apply.
 
 Worker hello includes bounded machine `metadata`: `model`, `user`, `hostname`, `os`, `architecture`, `cpuCores`, and `memoryBytes`. The node identity is a stable hardware-identity hash, its name is generated automatically, and metadata is persisted for administrator viewing even while offline. There is no public worker inventory endpoint.
 
@@ -63,6 +63,19 @@ JSON submissions contain exactly one source. `url` may be either a public HTTPS 
 ```
 
 Unknown JSON fields are rejected. A JSON input containing both `url` and `base64`, or neither, returns `400 INVALID_SOURCE`.
+
+For PDF inputs, `options.processingMode` controls routing. It accepts `auto`
+(the default), `text`, or `ocr`. `auto` extracts native PDF text in the proxy
+background queue and uses Mac OCR only when the PDF is scanned, image-based,
+mixed without usable text, or extraction fails. `text` requires extractable
+text and returns a failed document when the PDF needs OCR. `ocr` always sends
+the PDF to a Mac OCR worker. This routing is asynchronous and does not change
+the result shape: the completed result still contains `text`, `pageCount`, and
+page entries.
+
+PDF validation accepts up to 1,000 pages and 100 MiB per input. Large text PDFs
+are processed in the background; clients should use the returned document ID
+and poll rather than holding an HTTP request open.
 
 ## Large file upload through presigned URLs
 
@@ -225,6 +238,8 @@ For the complete result payload, Apple Vision field provenance, confidence seman
 ### `POST /v1/scans`
 
 Scan is an asynchronous **document scan** that returns a perspective-corrected, contrast-enhanced JPEG instead of text. It deliberately does **not** run OCR or expose recognition options — the only output is a clean image, suitable for re-submitting to `POST /v1/documents` when text is actually needed.
+
+The generated OpenAPI contract at `/api/v1/openapi.json` advertises this route as `ScanSubmission` and the polling response as `ScanStatus`; Swagger clients can use those schemas directly.
 
 Request body is the same input envelope as `/v1/documents`, plus an optional `notification` channel. `options` is **not accepted** for scans; the `processingMode` field in `options` is reserved for internal use and is rejected on public submissions.
 

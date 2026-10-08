@@ -47,6 +47,10 @@ Adaptive capacity defaults are embedded using `MACOCR_ADAPTIVE_CONCURRENCY`,
 `MACOCR_RESERVE_CORES`, `MACOCR_RESERVE_MEMORY_GB`, `MACOCR_MEMORY_PER_UNIT_GB`,
 `MACOCR_IMAGE_JOB_UNITS`, `MACOCR_PDF_JOB_UNITS`, and
 `MACOCR_CAPACITY_RECOVERY_SAMPLES`. There are no capacity settings in the app.
+The release default for `MACOCR_ADAPTIVE_CONCURRENCY` is `false`: the worker uses
+the operator limit and weighted job units without blocking on transient macOS
+free-memory readings. Set it to `true` only when a host needs adaptive CPU,
+memory, and thermal-pressure protection.
 
 ## Connection and identity
 

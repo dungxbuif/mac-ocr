@@ -80,9 +80,9 @@ public struct NativeAdaptiveConcurrencyPolicy: Sendable {
     public var recoverySamples: Int
 
     public init(
-        enabled: Bool = true,
+        enabled: Bool = false,
         reserveCores: Int = 2,
-        reserveMemoryBytes: UInt64 = 10 * 1024 * 1024 * 1024,
+        reserveMemoryBytes: UInt64 = 4 * 1024 * 1024 * 1024,
         memoryPerUnitBytes: UInt64 = 2 * 1024 * 1024 * 1024,
         imageJobUnits: Int = 1,
         pdfJobUnits: Int = 3,
@@ -112,9 +112,9 @@ public struct NativeAdaptiveConcurrencyPolicy: Sendable {
         }
         let gib = UInt64(1024 * 1024 * 1024)
         return NativeAdaptiveConcurrencyPolicy(
-            enabled: boolValue("MACOCR_ADAPTIVE_CONCURRENCY", "MacOCRAdaptiveConcurrency", true),
+            enabled: boolValue("MACOCR_ADAPTIVE_CONCURRENCY", "MacOCRAdaptiveConcurrency", false),
             reserveCores: intValue("MACOCR_RESERVE_CORES", "MacOCRReserveCores", 2),
-            reserveMemoryBytes: UInt64(max(0, intValue("MACOCR_RESERVE_MEMORY_GB", "MacOCRReserveMemoryGB", 10))) * gib,
+            reserveMemoryBytes: UInt64(max(0, intValue("MACOCR_RESERVE_MEMORY_GB", "MacOCRReserveMemoryGB", 4))) * gib,
             memoryPerUnitBytes: UInt64(max(1, intValue("MACOCR_MEMORY_PER_UNIT_GB", "MacOCRMemoryPerUnitGB", 2))) * gib,
             imageJobUnits: intValue("MACOCR_IMAGE_JOB_UNITS", "MacOCRImageJobUnits", 1),
             pdfJobUnits: intValue("MACOCR_PDF_JOB_UNITS", "MacOCRPDFJobUnits", 3),

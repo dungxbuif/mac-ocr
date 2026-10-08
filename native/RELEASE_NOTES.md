@@ -1,5 +1,14 @@
 # Mac OCR Native — Release Notes
 
+## 2.0.0 build 8 — Capacity tuning
+
+**Date:** October 6, 2026
+
+The updated worker build (2.0.0 build 9) disables adaptive CPU/memory/thermal gating by default.
+Workers use the configured operator limit and weighted job units, so transient
+macOS free-memory readings do not report zero capacity. Adaptive protection
+remains available through `MACOCR_ADAPTIVE_CONCURRENCY=true`.
+
 ## v1.0.3 — Document Scanning
 
 **Date:** August 18, 2026

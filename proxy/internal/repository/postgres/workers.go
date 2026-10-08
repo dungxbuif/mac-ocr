@@ -115,6 +115,13 @@ func (r *WorkerRepository) Revoke(ctx context.Context, nodeID string) error {
 	}
 	return err
 }
+func (r *WorkerRepository) Activate(ctx context.Context, nodeID string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE native_workers SET revoked=false, desired_control='resume' WHERE node_id=$1`, nodeID)
+	if err == nil && tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return err
+}
 func (r *WorkerRepository) Assign(ctx context.Context, route native.WorkerRoute) error {
 	tag, err := r.pool.Exec(ctx, `INSERT INTO native_worker_routes(attempt_id,node_id,document_id,kind) SELECT $1,$2,$3,$4 FROM documents d,native_workers n WHERE d.id=$3 AND d.attempt_id=$1 AND d.status='processing' AND n.node_id=$2 AND NOT n.revoked`, route.AttemptID, route.NodeID, route.DocumentID, route.Kind)
 	if err == nil && tag.RowsAffected() != 1 {

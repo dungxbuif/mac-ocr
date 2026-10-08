@@ -46,6 +46,13 @@ The presigned endpoint currently issues single-object `PUT` URLs and binds the d
 | `NOTIFICATION_ENCRYPTION_KEY` | Encrypts webhook secrets at rest; production requires a non-default value of at least 32 characters |
 | `PROCESSING_LEASE` | Scheduler ownership lease, default `15m` |
 | `PROCESSING_MAX_ATTEMPTS` | Maximum dispatch attempts, default `3` |
+| `PDF_INSPECTOR_BIN` | Proxy-side `pdf2md` helper path, default `/usr/local/bin/pdf2md` |
+| `PDF_INSPECTOR_TIMEOUT` | Maximum background text-extraction time per PDF, default `10m` |
+
+PDF text extraction is proxy-side and does not change the native Mac app. The
+proxy image includes the pinned Firecrawl `pdf-inspector` helper; when the
+helper is unavailable, `processingMode=auto` falls back to Mac OCR and
+`processingMode=text` fails clearly.
 
 ## Retention
 

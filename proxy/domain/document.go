@@ -16,8 +16,8 @@ const (
 )
 
 type OCROptions struct {
-	// ProcessingMode is internal-only metadata persisted with a queued job. It is
-	// never accepted from the public OCR API; scan jobs set it to "scan".
+	// ProcessingMode controls PDF routing. auto/text/ocr are public OCR modes;
+	// scan remains internal metadata set by the scan API.
 	ProcessingMode               string   `json:"processingMode,omitempty"`
 	RecognitionLevel             string   `json:"recognitionLevel,omitempty"`
 	Languages                    []string `json:"languages,omitempty"`

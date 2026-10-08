@@ -340,7 +340,7 @@ func (h *WorkerHub) Snapshot(ctx context.Context) ([]WorkerNode, []WorkerRoute, 
 	return nodes, routes, nil
 }
 func (h *WorkerHub) Control(ctx context.Context, nodeID, action string) error {
-	if action != "pause" && action != "resume" && action != "drain" && action != "revoke" {
+	if action != "pause" && action != "resume" && action != "drain" && action != "revoke" && action != "activate" {
 		return domain.ErrBadParamInput
 	}
 	if action == "revoke" {
@@ -348,8 +348,19 @@ func (h *WorkerHub) Control(ctx context.Context, nodeID, action string) error {
 			return err
 		}
 	}
+	if action == "activate" {
+		activator, ok := h.store.(interface {
+			Activate(context.Context, string) error
+		})
+		if !ok {
+			return errors.New("worker store does not support activation")
+		}
+		if err := activator.Activate(ctx, nodeID); err != nil {
+			return err
+		}
+	}
 	persisted := false
-	if action != "revoke" {
+	if action != "revoke" && action != "activate" {
 		if controls, ok := h.store.(interface {
 			SetDesiredControl(context.Context, string, string) error
 		}); ok {
@@ -367,17 +378,24 @@ func (h *WorkerHub) Control(ctx context.Context, nodeID, action string) error {
 		if action == "revoke" {
 			s.node.Revoked = true
 			s.node.Connected = false
+		} else if action == "activate" {
+			s.node.Revoked = false
+			s.node.Paused = false
+			s.node.ControlAction = "resume"
 		}
 	}
 	h.mu.Unlock()
 	if s == nil {
-		if action == "revoke" || persisted {
+		if action == "revoke" || action == "activate" || persisted {
 			return nil
 		}
 		return domain.ErrNotFound
 	}
 	if action == "revoke" {
 		_ = s.conn.Close()
+		return nil
+	}
+	if action == "activate" {
 		return nil
 	}
 	return s.write(WorkerMessage{Type: "control", Action: action})
