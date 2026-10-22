@@ -3,9 +3,9 @@
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?style=flat-square&logo=go)](https://go.dev/)
 [![Mezon SDK](https://img.shields.io/badge/Mezon-SDK--Go-0080FF?style=flat-square)](https://github.com/quangledang23/mezon-sdk-go)
 [![Backend Engine](https://img.shields.io/badge/Backend-MacOCR--Proxy-FF6B6B?style=flat-square)](../docs/README.md)
-[![LLM Model](https://img.shields.io/badge/LLM-qwen3.6--35b--a3b-722ED1?style=flat-square)](https://openai.com/)
+[![LLM Model](https://img.shields.io/badge/LLM-DeepSeek--V4.1--Flash-722ED1?style=flat-square)](https://openai.com/)
 
-**OmniScan** is an enterprise-grade AI chatbot service built in Go for the [Mezon Chat Platform](https://mezon.ai). It seamlessly integrates high-performance native OCR (`mac-ocr`) with advanced LLM Vision/Text AI Agents (`qwen/qwen3.6-35b-a3b`). 
+**OmniScan** is an enterprise-grade AI chatbot service built in Go for the [Mezon Chat Platform](https://mezon.ai). It seamlessly integrates high-performance native OCR (`mac-ocr`) with advanced LLM Vision/Text AI Agents (`DeepSeek-V4.1-Flash`). 
 
 OmniScan automatically detects document categories (Receipts, ID Cards, Contracts, General Documents), formats extracted data into structured Markdown tables, and enables users to conduct interactive follow-up Q&A directly in chat threads.
 
@@ -13,7 +13,7 @@ OmniScan automatically detects document categories (Receipts, ID Cards, Contract
 
 ## 🛠️ Highlights & Core Features
 
-- 🤖 **Smart `!scan` AI Agent**: Performs OCR and feeds extracted text to `qwen/qwen3.6-35b-a3b` for document classification (`[Hóa đơn]`, `[CCCD / Danh thiếp]`, `[Hợp đồng]`, `[Tài liệu chung]`) and structured Markdown rendering.
+- 🤖 **Smart `!scan` AI Agent**: Performs OCR and feeds extracted text to `DeepSeek-V4.1-Flash` for document classification (`[Hóa đơn]`, `[CCCD / Danh thiếp]`, `[Hợp đồng]`, `[Tài liệu chung]`) and structured Markdown rendering.
 - 💬 **Interactive Threaded Q&A**: Simply reply (quote reply) to any bot response message to ask up to 5 follow-up questions per document session.
 - ⚡ **Raw `!ocr` Mode**: Direct OCR extraction returning verbatim raw text preserved in clean code blocks.
 - 🔒 **Pre-Call SSRF & Security Validator**: Scheme verification (`http`/`https`), private/loopback IP blocking (`127.0.0.1`, `10.x.x.x`, `192.168.x.x`, `169.254.169.254`), file format restriction (`.png`, `.jpg`, `.jpeg`, `.webp`, `.tiff`, `.pdf`), and 100 MiB payload cap.
@@ -82,7 +82,7 @@ cp .env.example .env
 | `OCR_API_KEY` | **Yes** | — | Bearer API key for MacOCR (generated via `macocr-admin create-key`) |
 | `LLM_BASE_URL` | **Yes** | `http://10.10.0.10:1234/v1` | OpenAI-compatible LLM endpoint |
 | `LLM_API_KEY` | **Yes** | — | API key for LLM Agent |
-| `LLM_MODEL` | **Yes** | `qwen/qwen3.6-35b-a3b` | Target LLM model name |
+| `LLM_MODEL` | **Yes** | `DeepSeek-V4.1-Flash` | Target LLM model name |
 | `DAILY_SCAN_LIMIT` | No | `5` | Default daily scans per user |
 | `SESSION_ASK_LIMIT` | No | `5` | Default questions per scan session |
 | `REDIS_URL` | No | — | Redis URL for multi-replica horizontal scaling (e.g. `redis://localhost:6379/0`) |

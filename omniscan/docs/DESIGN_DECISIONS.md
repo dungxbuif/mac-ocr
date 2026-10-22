@@ -43,7 +43,7 @@ This document records all architectural decisions, design choices, database sche
   ├── ocr/         # MacOCR API client
   ├── security/    # SSRF & input validator
   ├── storage/     # QuotaStore, UserConfigStore & SessionStore (SQLite & Redis)
-  ├── agent/       # OpenAI-compatible LLM agent (qwen/qwen3.6-35b-a3b)
+  ├── agent/       # OpenAI-compatible LLM agent (DeepSeek-V4.1-Flash)
   ├── bot/         # Event handlers, routing & rich card formatters
   ├── docs/        # Architecture & decision documentation
   └── main.go      # Service entrypoint with process lock guard
@@ -56,14 +56,14 @@ This document records all architectural decisions, design choices, database sche
 | Variable | Description | Example / Default | Required |
 | :--- | :--- | :--- | :---: |
 | `MEZON_BOT_ID` | Mezon Bot ID | `2088352969647984640` | **Yes** |
-| `MEZON_BOT_TOKEN` | Mezon Bot Gateway Secret | `FijBrfNlDSXYOMvH` | **Yes** |
+| `MEZON_BOT_TOKEN` | Mezon Bot Gateway Secret | `<set-in-secret-manager>` | **Yes** |
 | `MEZON_HOST` | Gateway Host | `gw.mezon.ai` | No (default) |
 | `MEZON_PORT` | Gateway Port | `443` | No (default) |
 | `OCR_PROXY_URL` | MacOCR Proxy URL | `http://localhost:8080` | No (default) |
-| `OCR_API_KEY` | Bearer API Key for MacOCR | `sk_ocr_93f85d...` | **Yes** |
+| `OCR_API_KEY` | Bearer API Key for MacOCR | `<set-in-secret-manager>` | **Yes** |
 | `LLM_BASE_URL` | AI Agent Base URL | `http://10.10.0.10:1234/v1` | **Yes** |
-| `LLM_API_KEY` | AI Agent API Key | `sk-lm-xSAXb...` | **Yes** |
-| `LLM_MODEL` | AI Agent Model Name | `qwen/qwen3.6-35b-a3b` | **Yes** |
+| `LLM_API_KEY` | AI Agent API Key | `<set-in-secret-manager>` | **Yes** |
+| `LLM_MODEL` | AI Agent Model Name | `DeepSeek-V4.1-Flash` | **Yes** |
 | `DAILY_SCAN_LIMIT` | Default daily scans per user | `5` | No (default 5) |
 | `SESSION_ASK_LIMIT` | Default asks per scan session | `5` | No (default 5) |
 | `REDIS_URL` | Redis URL for Multi-Replica mode | `redis://localhost:6379/0` | Optional |
@@ -155,8 +155,8 @@ Enforces strict checks **before** dispatching requests to the backend:
 - **SDK**: `github.com/sashabaranov/go-openai`
 - **Environment Credentials**:
   - `LLM_BASE_URL=http://10.10.0.10:1234/v1`
-  - `LLM_API_KEY=sk-lm-xSAXbTjI:nEozedXNZyTMFLDgvovH`
-  - `LLM_MODEL=qwen/qwen3.6-35b-a3b`
+  - `LLM_API_KEY=<set-in-secret-manager>`
+  - `LLM_MODEL=DeepSeek-V4.1-Flash`
 - **Smart `!scan` Flow**:
   1. OCR text extraction via `mac-ocr`.
   2. LLM Agent Auto-Classification (`[Hóa đơn]`, `[CCCD / Danh thiếp]`, `[Hợp đồng]`, `[Tài liệu chung]`).
@@ -195,7 +195,7 @@ Enforces strict checks **before** dispatching requests to the backend:
 4. **Quota Engine**: Implemented `QuotaStore` with SQLite and Redis multi-replica implementations.
 5. **Horizontal Scaling**: Added Redis distributed deduplication (`SETNX`), `RedisSessionStore`, and L2 cache store adapter.
 6. **Command Refactoring**: Split raw OCR to `!ocr` and smart AI Agent to `!scan`.
-7. **AI Agent Integration**: Configured OpenAI Go SDK connecting to `qwen/qwen3.6-35b-a3b` at `http://10.10.0.10:1234/v1`.
+7. **AI Agent Integration**: Configured OpenAI Go SDK connecting to `DeepSeek-V4.1-Flash` through the configured OpenAI-compatible endpoint.
 8. **User Provisioning & Direct DB Limits**: Added `user_configs` table with auto-provisioning defaults on first encounter and dynamic DB limit lookup.
 9. **Privacy Purge**: Implemented immediate session deletion upon 5th Q&A completion and 24h background auto-cleanup.
 10. **Rich Card UI & Namespacing**: Designed card formatters, added subcommands `!omniscan help`, `!omniscan quota`, `!omniscan ping`.

@@ -2,7 +2,7 @@
 
 **Release Date:** August 15, 2026  
 **Build Status:** Production Ready 🟢 (`10/10 tests passed`)  
-**Core Stack:** Go 1.23+ • Mezon SDK Go • MacOCR Native Engine (Apple Silicon) • LLM Agent (`qwen3.6-35b-a3b` / OpenAI-compatible) • PostgreSQL / Redis / SQLite
+**Core Stack:** Go 1.23+ • Mezon SDK Go • MacOCR Native Engine (Apple Silicon) • LLM Agent (`DeepSeek-V4.1-Flash` / OpenAI-compatible) • PostgreSQL / Redis / SQLite
 
 ---
 
@@ -76,7 +76,7 @@ OCR_API_KEY=sk_ocr_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # LLM AI Agent Configuration
 LLM_BASE_URL=http://10.10.0.10:1234/v1
 LLM_API_KEY=your_llm_api_key
-LLM_MODEL=qwen/qwen3.6-35b-a3b
+LLM_MODEL=DeepSeek-V4.1-Flash
 
 # Storage & Quotas
 DAILY_SCAN_LIMIT=5

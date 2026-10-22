@@ -27,7 +27,7 @@ This document details all **functional requirements (FRs)**, **non-functional re
 
 ## 1. Executive Summary
 
-**OmniScan** is an enterprise-grade AI chatbot integrated into the Mezon platform. It bridges Mezon channels with the high-performance `mac-ocr` OCR Proxy engine and OpenAI-compatible Vision/Text LLM Models (`qwen/qwen3.6-35b-a3b`). OmniScan empowers users to extract text from images/PDFs, classify documents automatically, get structured Markdown tables, and interact with documents via quote-reply threads.
+**OmniScan** is an enterprise-grade AI chatbot integrated into the Mezon platform. It bridges Mezon channels with the high-performance `mac-ocr` OCR Proxy engine and the OpenAI-compatible Vision/Text model `DeepSeek-V4.1-Flash`. OmniScan empowers users to extract text from images/PDFs, classify documents automatically, get structured Markdown tables, and interact with documents via quote-reply threads.
 
 ---
 
