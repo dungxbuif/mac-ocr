@@ -24,6 +24,7 @@ stages:
   - test
   - registry
   - build
+  - migrate
   - deploy
   - verify
 
@@ -59,6 +60,11 @@ variables:
 .tag_rules:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^(dev|staging|prod)-[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$/'
+    - when: never
+
+.prod_tag_rules:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^prod-[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$/'
     - when: never
 
 .docker_job:
@@ -148,9 +154,41 @@ build_proxy_image:
   after_script:
     - docker logout "$LAB_REGISTRY_HOST" >/dev/null 2>&1 || true
 
+migrate_prod_db:
+  extends:
+    - .prod_tag_rules
+  stage: migrate
+  image: alpine:3.20
+  tags:
+    - vm110-macocr
+  needs:
+    - job: registry_smoke
+    - job: build_proxy_image
+      artifacts: true
+  script:
+    - apk add --no-cache openssh-client
+    - test -n "${LAB_REGISTRY_HOST:-}" || (echo "LAB_REGISTRY_HOST is required" >&2; exit 1)
+    - test -n "${LAB_REGISTRY_PULL_USER:-}" || (echo "LAB_REGISTRY_PULL_USER is required" >&2; exit 1)
+    - test -n "${LAB_REGISTRY_PULL_PASSWORD:-}" || (echo "LAB_REGISTRY_PULL_PASSWORD is required" >&2; exit 1)
+    - test -n "${MACOCR_MIGRATION_DATABASE_URL:-}" || (echo "MACOCR_MIGRATION_DATABASE_URL is required" >&2; exit 1)
+    - test -n "${MACOCR_SWARM_MANAGER_HOST:-}" || (echo "MACOCR_SWARM_MANAGER_HOST is required" >&2; exit 1)
+    - test -n "${MACOCR_SWARM_MANAGER_USER:-}" || (echo "MACOCR_SWARM_MANAGER_USER is required" >&2; exit 1)
+    - test -n "${MACOCR_SWARM_SSH_PRIVATE_KEY:-}" || (echo "MACOCR_SWARM_SSH_PRIVATE_KEY is required" >&2; exit 1)
+    - test -n "${MACOCR_SWARM_KNOWN_HOSTS:-}" || (echo "MACOCR_SWARM_KNOWN_HOSTS is required" >&2; exit 1)
+    - install -m 0600 /dev/null deploy-key
+    - printf '%s\n' "$MACOCR_SWARM_SSH_PRIVATE_KEY" > deploy-key
+    - install -m 0644 /dev/null known-hosts
+    - printf '%s\n' "$MACOCR_SWARM_KNOWN_HOSTS" > known-hosts
+    - export SSH_OPTS="-i $CI_PROJECT_DIR/deploy-key -o UserKnownHostsFile=$CI_PROJECT_DIR/known-hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=10"
+    - export SWARM_TARGET="$MACOCR_SWARM_MANAGER_USER@$MACOCR_SWARM_MANAGER_HOST"
+    - ssh $SSH_OPTS "$SWARM_TARGET" "docker network inspect pg-net >/dev/null"
+    - printf '%s' "$LAB_REGISTRY_PULL_PASSWORD" | ssh $SSH_OPTS "$SWARM_TARGET" "docker login '$LAB_REGISTRY_HOST' --username '$LAB_REGISTRY_PULL_USER' --password-stdin"
+    - printf 'DATABASE_URL=%s\n' "$MACOCR_MIGRATION_DATABASE_URL" | ssh $SSH_OPTS "$SWARM_TARGET" "docker run --rm --network pg-net --env-file /dev/stdin --entrypoint /usr/local/bin/macocr-admin '$IMAGE_DIGEST' migrate"
+    - ssh $SSH_OPTS "$SWARM_TARGET" "docker logout '$LAB_REGISTRY_HOST' >/dev/null 2>&1 || true"
+
 deploy_prod_swarm:
   extends:
-    - .tag_rules
+    - .prod_tag_rules
   stage: deploy
   image: alpine:3.20
   tags:
@@ -159,12 +197,12 @@ deploy_prod_swarm:
     - job: registry_smoke
     - job: build_proxy_image
       artifacts: true
+    - job: migrate_prod_db
   environment:
     name: production
     url: https://ocr.dungxbuif.com
   script:
     - apk add --no-cache curl openssh-client
-    - case "$CI_COMMIT_TAG" in prod-*) ;; *) echo "Only prod-* tags may deploy production" >&2; exit 1 ;; esac
     - test -n "${LAB_REGISTRY_HOST:-}" || (echo "LAB_REGISTRY_HOST is required" >&2; exit 1)
     - test -n "${LAB_REGISTRY_PULL_USER:-}" || (echo "LAB_REGISTRY_PULL_USER is required" >&2; exit 1)
     - test -n "${LAB_REGISTRY_PULL_PASSWORD:-}" || (echo "LAB_REGISTRY_PULL_PASSWORD is required" >&2; exit 1)
@@ -185,7 +223,7 @@ deploy_prod_swarm:
 
 verify_prod_swarm:
   extends:
-    - .tag_rules
+    - .prod_tag_rules
   stage: verify
   image: alpine:3.20
   tags:

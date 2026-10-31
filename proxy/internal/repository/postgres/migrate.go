@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 const schema = `
@@ -195,8 +196,27 @@ AFTER INSERT ON users
 FOR EACH ROW EXECUTE FUNCTION create_default_account_config();
 `
 
-func (r *Repository) Migrate(ctx context.Context) error {
-	if _, err := r.pool.Exec(ctx, schema); err != nil {
+const migrationLockKey int64 = 732184639
+
+func (r *Repository) Migrate(ctx context.Context) (err error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLockKey); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, unlockErr := conn.Exec(unlockCtx, "SELECT pg_advisory_unlock($1)", migrationLockKey); err == nil && unlockErr != nil {
+			err = fmt.Errorf("release migration lock: %w", unlockErr)
+		}
+	}()
+
+	if _, err := conn.Exec(ctx, schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
 	return nil

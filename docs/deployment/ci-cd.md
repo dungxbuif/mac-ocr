@@ -29,6 +29,27 @@ environments. They do not deploy production. A tag is the only release trigger;
 ordinary merge-request and default-branch pipelines validate source changes but
 never update the live service.
 
+## Database migration gate
+
+Every `prod-*` tag runs `migrate_prod_db` after the registry smoke test and
+image build, but before the Swarm service update. The job runs the exact
+`macocr-admin migrate` binary from the immutable image digest on the Pi5 Swarm
+manager, attached only to the existing `pg-net` overlay network. It receives a
+protected `MACOCR_MIGRATION_DATABASE_URL` variable through stdin; the URL is
+never written to the repository, image, job log, or a persistent host file.
+
+The application currently uses one idempotent PostgreSQL schema migration
+function. The same function is used at application startup and by the explicit
+migration command, with a PostgreSQL advisory lock so a release job and a
+starting service cannot apply the schema concurrently. A migration failure
+blocks deployment. Tags for `dev` and `staging` do not touch production.
+
+New schema changes must follow expand/contract compatibility: add or backfill
+before the new binary depends on a change, keep the previous image able to
+start during rollback, and defer destructive drops to a separately reviewed
+release. The migration job is therefore a release gate, not a second source of
+schema definitions.
+
 ## GitLab variables
 
 These variables are provisioned at the GitLab global/instance scope when the
@@ -43,6 +64,7 @@ protected; the protected tag policy is the production gate.
 | `LAB_REGISTRY_PUSH_PASSWORD` | write deploy-token value | yes | smoke/build |
 | `LAB_REGISTRY_PULL_USER` | read deploy-token username | yes | Swarm deploy |
 | `LAB_REGISTRY_PULL_PASSWORD` | read deploy-token value | yes | Swarm deploy |
+| `MACOCR_MIGRATION_DATABASE_URL` | production PostgreSQL URL for the one-shot migration command | yes | migration gate |
 | `MACOCR_SWARM_MANAGER_HOST` | Pi5 Swarm manager address | no | deploy |
 | `MACOCR_SWARM_MANAGER_USER` | SSH user on the manager | no | deploy |
 | `MACOCR_SWARM_SSH_PRIVATE_KEY` | protected deployment key | yes | deploy |

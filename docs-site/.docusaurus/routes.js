@@ -4,15 +4,15 @@ import ComponentCreator from '@docusaurus/ComponentCreator';
 export default [
   {
     path: '/',
-    component: ComponentCreator('/', '157'),
+    component: ComponentCreator('/', '8b1'),
     routes: [
       {
         path: '/',
-        component: ComponentCreator('/', '512'),
+        component: ComponentCreator('/', '843'),
         routes: [
           {
             path: '/',
-            component: ComponentCreator('/', 'd65'),
+            component: ComponentCreator('/', '901'),
             routes: [
               {
                 path: '/api/API_REFERENCE',
@@ -39,7 +39,7 @@ export default [
               },
               {
                 path: '/deployment/ci-cd',
-                component: ComponentCreator('/deployment/ci-cd', '641'),
+                component: ComponentCreator('/deployment/ci-cd', 'e13'),
                 exact: true,
                 sidebar: "docsSidebar"
               },
@@ -74,7 +74,7 @@ export default [
               },
               {
                 path: '/',
-                component: ComponentCreator('/', '1db'),
+                component: ComponentCreator('/', '039'),
                 exact: true,
                 sidebar: "docsSidebar"
               }

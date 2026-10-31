@@ -22,6 +22,10 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+	if os.Args[1] == "migrate" {
+		handleMigrate()
+		return
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -88,6 +92,30 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+func handleMigrate() {
+	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	if databaseURL == "" {
+		fmt.Fprintln(os.Stderr, "Error: DATABASE_URL is required for migrate")
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	pgRepo, err := pgrepo.New(ctx, databaseURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error connecting to PostgreSQL: %v\n", err)
+		os.Exit(1)
+	}
+	defer pgRepo.Close()
+
+	if err := pgRepo.Migrate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Error applying schema migrations: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Database migrations applied")
 }
 
 func handleSeed(ctx context.Context, users domain.UserRepository, configs domain.AccountConfigRepository, args []string) {
@@ -442,6 +470,9 @@ Usage:
   go run ./cmd/admin <command> [options]
 
 Commands:
+  migrate       Apply idempotent PostgreSQL schema migrations only
+                DATABASE_URL=<production database URL>
+
   seed          Seed or reset the single Admin account
                 --email <email> --password <password>
 
