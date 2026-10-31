@@ -31,19 +31,22 @@ never update the live service.
 
 ## Shared lab runner
 
-This project is stored under the private `homelab-apps` group and targets the
-protected Mac Group Runner through the exclusive `homelab-mac` tag. The runner
-is one of the two registrations served by the single local process in
-`~/dev-env` (`concurrent = 2`), and has 48 GiB of host memory for the parallel
-Rust/Go image build. The `homelab-rootless` tag remains available to the same
-Mac process for the shared homelab automation pool; it is not used by this
-project so release jobs cannot fall back to VM100/VM110 accidentally.
+This project is stored under the private `homelab-apps` group and uses the
+shared `homelab-rootless` tag. The Mac runner is the preferred local capacity
+for this pool and is one of the two registrations served by the single local
+process in `~/dev-env` (`concurrent = 2`), with 48 GiB of host memory for the
+parallel Rust/Go image build. The same tag is also used by the VM100
+homelab-automation runner where that project is in scope; GitLab does not
+provide a strict priority field between eligible runners, so the pool remains
+failover-capable rather than binding every repository to a Mac-only tag.
 
 Every job in `.gitlab-ci.yml`, including validation, registry, build, migration,
-deploy, and verification, uses `homelab-mac`. The runner is protected and the
-release tag patterns are protected, so credentials and deployment jobs remain
-inside the protected release path. The macOS native worker is still an
-external client: the lab pipeline does not build or sign that native app.
+deploy, and verification, uses `homelab-rootless`. The Mac runner remains
+protected and the release tag patterns are protected, so credentials and
+deployment jobs remain inside the protected release path. Use `homelab-mac`
+only when a future job genuinely requires the Mac host; it is not the default
+tag for Homelab CI/CD. The macOS native worker is still an external client: the
+lab pipeline does not build or sign that native app.
 
 The Mac Docker-in-Docker service is started with the Mac's lab DNS resolver
 (`10.10.0.5`) and a public fallback (`1.1.1.1`). This is required for nested

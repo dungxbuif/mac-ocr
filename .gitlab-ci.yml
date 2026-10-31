@@ -77,14 +77,14 @@ variables:
       # public fallback for Alpine/Docker Hub mirrors.
       command: ["--dns=10.10.0.5", "--dns=1.1.1.1"]
   tags:
-    - homelab-mac
+    - homelab-rootless
 
 go_test:
   extends: .proxy_rules
   stage: test
   image: golang:1.26.6-alpine
   tags:
-    - homelab-mac
+    - homelab-rootless
   script:
     - cd proxy
     - go test ./...
@@ -95,7 +95,7 @@ admin_ui_build:
   stage: test
   image: node:20-alpine
   tags:
-    - homelab-mac
+    - homelab-rootless
   script:
     - cd proxy/admin-ui
     - npm ci
@@ -106,7 +106,7 @@ docs_site_build:
   stage: test
   image: node:20-alpine
   tags:
-    - homelab-mac
+    - homelab-rootless
   script:
     - cd docs-site
     - npm ci
@@ -164,7 +164,7 @@ migrate_prod_db:
   stage: migrate
   image: alpine:3.20
   tags:
-    - homelab-mac
+    - homelab-rootless
   needs:
     - job: registry_smoke
     - job: build_proxy_image
@@ -196,7 +196,7 @@ deploy_prod_swarm:
   stage: deploy
   image: alpine:3.20
   tags:
-    - homelab-mac
+    - homelab-rootless
   needs:
     - job: registry_smoke
     - job: build_proxy_image
@@ -231,7 +231,7 @@ verify_prod_swarm:
   stage: verify
   image: alpine:3.20
   tags:
-    - homelab-mac
+    - homelab-rootless
   needs:
     - deploy_prod_swarm
   script:
