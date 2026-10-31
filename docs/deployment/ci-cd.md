@@ -31,12 +31,19 @@ never update the live service.
 
 ## Shared lab runner
 
-This project is stored under the private `homelab-apps` group and uses the
-shared Group Runner on VM110 (`db-ops`) through the `homelab-docker` tag. The
-runner is isolated from the production VM100 Docker daemon and accepts only
-protected release jobs. New lab components should use the same tag after their
-project is placed under this group; a project-specific runner is reserved for
-exceptional trust or hardware requirements.
+This project is stored under the private `homelab-apps` group and targets the
+protected Mac Group Runner through the exclusive `homelab-mac` tag. The runner
+is one of the two registrations served by the single local process in
+`~/dev-env` (`concurrent = 2`), and has 48 GiB of host memory for the parallel
+Rust/Go image build. The `homelab-rootless` tag remains available to the same
+Mac process for the shared homelab automation pool; it is not used by this
+project so release jobs cannot fall back to VM100/VM110 accidentally.
+
+Every job in `.gitlab-ci.yml`, including validation, registry, build, migration,
+deploy, and verification, uses `homelab-mac`. The runner is protected and the
+release tag patterns are protected, so credentials and deployment jobs remain
+inside the protected release path. The macOS native worker is still an
+external client: the lab pipeline does not build or sign that native app.
 
 ## Database migration gate
 
