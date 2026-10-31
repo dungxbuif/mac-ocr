@@ -1,0 +1,24 @@
+{
+  "id": "deployment/ci-cd",
+  "title": "Lab CI/CD delivery",
+  "description": "The lab pipeline delivers only the Linux proxy component. The macOS native",
+  "source": "@site/../docs/deployment/ci-cd.md",
+  "sourceDirName": "deployment",
+  "slug": "/deployment/ci-cd",
+  "permalink": "/deployment/ci-cd",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": null,
+  "sidebarPosition": 2,
+  "frontMatter": {
+    "title": "Lab CI/CD delivery",
+    "sidebar_position": 2
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Production deployment",
+    "permalink": "/deployment/production"
+  }
+}

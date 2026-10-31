@@ -21,7 +21,6 @@ export default {
           exclude: [
             "architecture/**",
             "configuration/**",
-            "deployment/**",
             "planning/**",
             "superpowers/**",
             "testing/**",

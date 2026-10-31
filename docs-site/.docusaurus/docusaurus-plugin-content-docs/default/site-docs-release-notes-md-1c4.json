@@ -1,7 +1,7 @@
 {
   "id": "RELEASE_NOTES",
-  "title": "Release Notes — v1.0.1",
-  "description": "Release Date: August 15, 2026",
+  "title": "Release Notes — v2.0.0",
+  "description": "Release Date: October 6, 2026",
   "source": "@site/../docs/RELEASE_NOTES.md",
   "sourceDirName": ".",
   "slug": "/RELEASE_NOTES",
@@ -10,6 +10,6 @@
   "unlisted": false,
   "tags": [],
   "version": "current",
-  "lastUpdatedAt": 1786750336000,
+  "lastUpdatedAt": 1791444332000,
   "frontMatter": {}
 }

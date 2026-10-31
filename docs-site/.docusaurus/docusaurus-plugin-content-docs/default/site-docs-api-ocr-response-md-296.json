@@ -18,8 +18,8 @@
   },
   "sidebar": "docsSidebar",
   "previous": {
-    "title": "OmniScan Bot Integration",
-    "permalink": "/guides/OMNISCAN_BOT"
+    "title": "Connect Mac workers",
+    "permalink": "/guides/mac-workers"
   },
   "next": {
     "title": "MCP integration",

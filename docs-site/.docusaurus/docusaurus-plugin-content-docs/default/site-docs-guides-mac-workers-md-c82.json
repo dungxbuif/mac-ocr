@@ -1,0 +1,28 @@
+{
+  "id": "guides/mac-workers",
+  "title": "Connect Mac workers",
+  "description": "Install Mac OCR Native on each Mac you want to contribute OCR capacity. Each app connects outbound to your production server over secure WebSocket. Macs may be on different networks; no incoming Mac port, VPN, or separate OCR tunnel service is required in outbound mode.",
+  "source": "@site/../docs/guides/mac-workers.md",
+  "sourceDirName": "guides",
+  "slug": "/guides/mac-workers",
+  "permalink": "/guides/mac-workers",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "lastUpdatedAt": 1791444332000,
+  "sidebarPosition": 3,
+  "frontMatter": {
+    "title": "Connect Mac workers",
+    "sidebar_position": 3
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "OmniScan Bot Integration",
+    "permalink": "/guides/OMNISCAN_BOT"
+  },
+  "next": {
+    "title": "OCR response model",
+    "permalink": "/api/OCR_RESPONSE"
+  }
+}

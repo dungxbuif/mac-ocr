@@ -10,7 +10,7 @@
   "unlisted": false,
   "tags": [],
   "version": "current",
-  "lastUpdatedAt": null,
+  "lastUpdatedAt": 1786764648000,
   "sidebarPosition": 3,
   "frontMatter": {
     "title": "OmniScan Bot Integration",
@@ -22,7 +22,7 @@
     "permalink": "/guides/onboarding"
   },
   "next": {
-    "title": "OCR response model",
-    "permalink": "/api/OCR_RESPONSE"
+    "title": "Connect Mac workers",
+    "permalink": "/guides/mac-workers"
   }
 }

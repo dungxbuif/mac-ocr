@@ -26,6 +26,21 @@
               "sidebar": "docsSidebar"
             },
             {
+              "id": "deployment/ci-cd",
+              "path": "/deployment/ci-cd",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "deployment/production",
+              "path": "/deployment/production",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "guides/mac-workers",
+              "path": "/guides/mac-workers",
+              "sidebar": "docsSidebar"
+            },
+            {
               "id": "guides/OMNISCAN_BOT",
               "path": "/guides/OMNISCAN_BOT",
               "sidebar": "docsSidebar"

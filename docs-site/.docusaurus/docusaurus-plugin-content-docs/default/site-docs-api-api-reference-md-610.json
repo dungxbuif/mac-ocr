@@ -10,11 +10,15 @@
   "unlisted": false,
   "tags": [],
   "version": "current",
-  "lastUpdatedAt": 1786741849000,
+  "lastUpdatedAt": 1791444332000,
   "frontMatter": {},
   "sidebar": "docsSidebar",
   "previous": {
     "title": "MCP integration",
     "permalink": "/api/MCP_INTEGRATION"
+  },
+  "next": {
+    "title": "Production deployment",
+    "permalink": "/deployment/production"
   }
 }

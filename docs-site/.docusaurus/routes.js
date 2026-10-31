@@ -4,19 +4,19 @@ import ComponentCreator from '@docusaurus/ComponentCreator';
 export default [
   {
     path: '/',
-    component: ComponentCreator('/', '4a2'),
+    component: ComponentCreator('/', '157'),
     routes: [
       {
         path: '/',
-        component: ComponentCreator('/', '342'),
+        component: ComponentCreator('/', '512'),
         routes: [
           {
             path: '/',
-            component: ComponentCreator('/', '1b6'),
+            component: ComponentCreator('/', 'd65'),
             routes: [
               {
                 path: '/api/API_REFERENCE',
-                component: ComponentCreator('/api/API_REFERENCE', '386'),
+                component: ComponentCreator('/api/API_REFERENCE', '4b1'),
                 exact: true,
                 sidebar: "docsSidebar"
               },
@@ -38,25 +38,43 @@ export default [
                 exact: true
               },
               {
+                path: '/deployment/ci-cd',
+                component: ComponentCreator('/deployment/ci-cd', '641'),
+                exact: true,
+                sidebar: "docsSidebar"
+              },
+              {
+                path: '/deployment/production',
+                component: ComponentCreator('/deployment/production', '4a9'),
+                exact: true,
+                sidebar: "docsSidebar"
+              },
+              {
+                path: '/guides/mac-workers',
+                component: ComponentCreator('/guides/mac-workers', 'dc2'),
+                exact: true,
+                sidebar: "docsSidebar"
+              },
+              {
                 path: '/guides/OMNISCAN_BOT',
-                component: ComponentCreator('/guides/OMNISCAN_BOT', 'f10'),
+                component: ComponentCreator('/guides/OMNISCAN_BOT', 'bd0'),
                 exact: true,
                 sidebar: "docsSidebar"
               },
               {
                 path: '/guides/onboarding',
-                component: ComponentCreator('/guides/onboarding', '356'),
+                component: ComponentCreator('/guides/onboarding', '5d3'),
                 exact: true,
                 sidebar: "docsSidebar"
               },
               {
                 path: '/RELEASE_NOTES',
-                component: ComponentCreator('/RELEASE_NOTES', '2c0'),
+                component: ComponentCreator('/RELEASE_NOTES', '60b'),
                 exact: true
               },
               {
                 path: '/',
-                component: ComponentCreator('/', '51b'),
+                component: ComponentCreator('/', '1db'),
                 exact: true,
                 sidebar: "docsSidebar"
               }

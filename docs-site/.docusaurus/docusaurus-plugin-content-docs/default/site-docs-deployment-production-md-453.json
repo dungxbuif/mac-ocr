@@ -1,7 +1,7 @@
 {
   "id": "deployment/production",
   "title": "Production deployment",
-  "description": "This is a release checklist, not a provider-specific infrastructure template. The OCR worker requires macOS; deploy the Go proxy and its stateful dependencies according to your platform, then provide routable private connectivity to the native worker.",
+  "description": "This is a release checklist, not a provider-specific infrastructure template. The OCR worker requires macOS. With NATIVETRANSPORT=websocket, each Mac connects outbound to the Go proxy's public HTTPS endpoint. Legacy NATIVETRANSPORT=http instead requires routable connectivity from the proxy to a native HTTP listener.",
   "source": "@site/../docs/deployment/production.md",
   "sourceDirName": "deployment",
   "slug": "/deployment/production",
@@ -10,7 +10,7 @@
   "unlisted": false,
   "tags": [],
   "version": "current",
-  "lastUpdatedAt": null,
+  "lastUpdatedAt": 1791297739000,
   "sidebarPosition": 1,
   "frontMatter": {
     "title": "Production deployment",
@@ -18,11 +18,11 @@
   },
   "sidebar": "docsSidebar",
   "previous": {
-    "title": "Manual Test Flow",
-    "permalink": "/testing/TEST_FLOW_GUIDE"
+    "title": "OCR API Reference",
+    "permalink": "/api/API_REFERENCE"
   },
   "next": {
-    "title": "Implementation Status",
-    "permalink": "/planning/IMPLEMENTATION_PLAN"
+    "title": "Lab CI/CD delivery",
+    "permalink": "/deployment/ci-cd"
   }
 }

@@ -22,6 +22,7 @@ Integrate image and PDF text recognition through REST or MCP. OCR Platform accep
 5. Check [Release Notes](RELEASE_NOTES.md) for current features and changelog.
 6. Read [OmniScan Mezon Bot Design & Architecture](pathname://../omniscan/docs/DESIGN_DECISIONS.md) for Mezon bot decisions.
 7. Follow [Connect Mac workers](guides/mac-workers.md) to install manually shared apps and manage worker capacity across networks.
+8. Follow [Lab CI/CD delivery](deployment/ci-cd.md) for tag releases, registry variables, runner placement, and Swarm rollback.
 
 ## Core contract
 
