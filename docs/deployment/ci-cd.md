@@ -45,6 +45,12 @@ release tag patterns are protected, so credentials and deployment jobs remain
 inside the protected release path. The macOS native worker is still an
 external client: the lab pipeline does not build or sign that native app.
 
+The image build passes Docker BuildKit `--network=host` only for `RUN` steps
+inside the build. This works around DNS resolution failures observed in the
+Mac Docker-in-Docker BuildKit network while preserving the image's runtime
+network configuration; it does not grant the resulting container host-network
+mode.
+
 ## Database migration gate
 
 Every `prod-*` tag runs `migrate_prod_db` after the registry smoke test and
