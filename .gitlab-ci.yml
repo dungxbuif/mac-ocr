@@ -73,14 +73,14 @@ variables:
     - name: docker:27.5.1-dind-rootless
       alias: docker
   tags:
-    - vm110-macocr
+    - homelab-docker
 
 go_test:
   extends: .proxy_rules
   stage: test
   image: golang:1.26.6-alpine
   tags:
-    - vm110-macocr
+    - homelab-docker
   script:
     - cd proxy
     - go test ./...
@@ -91,7 +91,7 @@ admin_ui_build:
   stage: test
   image: node:20-alpine
   tags:
-    - vm110-macocr
+    - homelab-docker
   script:
     - cd proxy/admin-ui
     - npm ci
@@ -102,7 +102,7 @@ docs_site_build:
   stage: test
   image: node:20-alpine
   tags:
-    - vm110-macocr
+    - homelab-docker
   script:
     - cd docs-site
     - npm ci
@@ -160,7 +160,7 @@ migrate_prod_db:
   stage: migrate
   image: alpine:3.20
   tags:
-    - vm110-macocr
+    - homelab-docker
   needs:
     - job: registry_smoke
     - job: build_proxy_image
@@ -192,7 +192,7 @@ deploy_prod_swarm:
   stage: deploy
   image: alpine:3.20
   tags:
-    - vm110-macocr
+    - homelab-docker
   needs:
     - job: registry_smoke
     - job: build_proxy_image
@@ -227,7 +227,7 @@ verify_prod_swarm:
   stage: verify
   image: alpine:3.20
   tags:
-    - vm110-macocr
+    - homelab-docker
   needs:
     - deploy_prod_swarm
   script:

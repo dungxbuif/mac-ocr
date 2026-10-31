@@ -29,6 +29,15 @@ environments. They do not deploy production. A tag is the only release trigger;
 ordinary merge-request and default-branch pipelines validate source changes but
 never update the live service.
 
+## Shared lab runner
+
+This project is stored under the private `homelab-apps` group and uses the
+shared Group Runner on VM110 (`db-ops`) through the `homelab-docker` tag. The
+runner is isolated from the production VM100 Docker daemon and accepts only
+protected release jobs. New lab components should use the same tag after their
+project is placed under this group; a project-specific runner is reserved for
+exceptional trust or hardware requirements.
+
 ## Database migration gate
 
 Every `prod-*` tag runs `migrate_prod_db` after the registry smoke test and
@@ -52,14 +61,14 @@ schema definitions.
 
 ## GitLab variables
 
-These variables are provisioned at the GitLab global/instance scope when the
-lab control plane is available. Until then, the same names may be added at
-project scope for `dungxbuif/mac-ocr`. Secret variables must be masked and
+Common variables are provisioned at the `homelab-apps` group scope. Deployment
+credentials remain project/environment-scoped unless the lab secret policy
+explicitly approves sharing them. Secret variables must be masked and
 protected; the protected tag policy is the production gate.
 
 | Variable | Purpose | Secret | Required by |
 |---|---|---:|---|
-| `LAB_REGISTRY_HOST` | `registry-gitlab.dungxbuif.com` | no | registry/build |
+| `LAB_REGISTRY_HOST` | `registry-gitlab.dungxbuif.com` | no | group registry/build |
 | `LAB_REGISTRY_PUSH_USER` | write deploy-token username | yes | smoke/build |
 | `LAB_REGISTRY_PUSH_PASSWORD` | write deploy-token value | yes | smoke/build |
 | `LAB_REGISTRY_PULL_USER` | read deploy-token username | yes | Swarm deploy |
