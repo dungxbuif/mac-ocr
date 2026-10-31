@@ -45,11 +45,13 @@ release tag patterns are protected, so credentials and deployment jobs remain
 inside the protected release path. The macOS native worker is still an
 external client: the lab pipeline does not build or sign that native app.
 
-The image build passes Docker BuildKit `--network=host` only for `RUN` steps
-inside the build. This works around DNS resolution failures observed in the
-Mac Docker-in-Docker BuildKit network while preserving the image's runtime
-network configuration; it does not grant the resulting container host-network
-mode.
+The Mac Docker-in-Docker service is started with the Mac's lab DNS resolver
+(`10.10.0.5`) and a public fallback (`1.1.1.1`). This is required for nested
+BuildKit `RUN` steps: the job container can resolve names, but the inner
+builder otherwise inherits an unusable nested resolver and `apk` cannot reach
+Alpine mirrors. The build uses the normal Docker network mode after the
+daemon-level DNS fix; this changes neither the runtime network configuration
+nor the networks attached to the resulting image.
 
 ## Database migration gate
 
