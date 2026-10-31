@@ -48,13 +48,16 @@ only when a future job genuinely requires the Mac host; it is not the default
 tag for Homelab CI/CD. The macOS native worker is still an external client: the
 lab pipeline does not build or sign that native app.
 
-The Mac Docker-in-Docker service is started with the Mac's lab DNS resolver
-(`10.10.0.5`) and a public fallback (`1.1.1.1`). This is required for nested
-BuildKit `RUN` steps: the job container can resolve names, but the inner
-builder otherwise inherits an unusable nested resolver and `apk` cannot reach
-Alpine mirrors. The build uses the normal Docker network mode after the
-daemon-level DNS fix; this changes neither the runtime network configuration
-nor the networks attached to the resulting image.
+The shared Mac runner configures the Docker executor with the lab DNS resolver
+(`10.10.0.5`) and a public fallback (`1.1.1.1`) for both job and service
+containers. This is required for nested BuildKit `RUN` steps: the job
+container can resolve names, but the inner builder otherwise inherits an
+unusable nested resolver and `apk` cannot reach Alpine mirrors. Keep this at
+the runner layer in `~/dev-env/config.toml`; project `.gitlab-ci.yml` files
+must not add a per-job DinD DNS command. The build uses the normal Docker
+network mode after the shared daemon-level DNS fix; this changes neither the
+runtime network configuration nor the networks attached to the resulting
+image.
 
 ## Database migration gate
 

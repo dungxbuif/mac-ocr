@@ -72,10 +72,6 @@ variables:
   services:
     - name: docker:27.5.1-dind-rootless
       alias: docker
-      # The nested BuildKit daemon must not inherit Docker Desktop's
-      # per-job resolver. Keep lab DNS for private registry names and use a
-      # public fallback for Alpine/Docker Hub mirrors.
-      command: ["--dns=10.10.0.5", "--dns=1.1.1.1"]
   tags:
     - homelab-rootless
 
