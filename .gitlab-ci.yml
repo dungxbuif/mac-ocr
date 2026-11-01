@@ -22,6 +22,7 @@ workflow:
 stages:
   - validate
   - test
+  - release_guard
   - registry
   - build
   - migrate
@@ -37,6 +38,7 @@ variables:
   DOCKER_DRIVER: overlay2
   DOCKER_BUILDKIT: "1"
   GOTOOLCHAIN: local
+  RELEASE_BRANCH: main
 
 .proxy_rules:
   rules:
@@ -108,11 +110,24 @@ docs_site_build:
     - npm ci
     - npm run build
 
+release_branch_guard:
+  extends:
+    - .tag_rules
+  stage: release_guard
+  image: alpine/git:2.49.1
+  tags:
+    - homelab-rootless
+  script:
+    - test -n "$RELEASE_BRANCH"
+    - git fetch --no-tags origin "$RELEASE_BRANCH"
+    - git merge-base --is-ancestor "$CI_COMMIT_SHA" "origin/$RELEASE_BRANCH" || { echo "release tag is not reachable from protected $RELEASE_BRANCH" >&2; exit 1; }
+
 registry_smoke:
   extends:
     - .docker_job
     - .tag_rules
   stage: registry
+  needs: [release_branch_guard]
   script:
     - test -n "${LAB_REGISTRY_HOST:-}" || (echo "LAB_REGISTRY_HOST is required" >&2; exit 1)
     - test -n "${LAB_REGISTRY_PUSH_USER:-}" || (echo "LAB_REGISTRY_PUSH_USER is required" >&2; exit 1)
@@ -132,6 +147,7 @@ build_proxy_image:
     - .docker_job
     - .tag_rules
   stage: build
+  needs: [release_branch_guard]
   script:
     - test -n "${LAB_REGISTRY_HOST:-}" || (echo "LAB_REGISTRY_HOST is required" >&2; exit 1)
     - test -n "${LAB_REGISTRY_PUSH_USER:-}" || (echo "LAB_REGISTRY_PUSH_USER is required" >&2; exit 1)

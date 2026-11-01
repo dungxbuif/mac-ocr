@@ -29,6 +29,11 @@ environments. They do not deploy production. A tag is the only release trigger;
 ordinary merge-request and default-branch pipelines validate source changes but
 never update the live service.
 
+Before any tag can publish or deploy, `release_branch_guard` verifies that the
+tag commit is reachable from the protected `main` branch. A tag created from a
+feature or workspace branch fails closed and cannot push an image or touch
+Swarm.
+
 ## Shared lab runner
 
 This project is stored under the private `homelab-apps` group and uses the
