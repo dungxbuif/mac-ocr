@@ -17,6 +17,13 @@ workflow:
         - docs-site/**
         - docs/**
         - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Dockerfile
+        - proxy/**
+        - docs-site/**
+        - docs/**
+        - .gitlab-ci.yml
     - when: never
 
 stages:
@@ -51,6 +58,13 @@ variables:
         - docs/**
         - .gitlab-ci.yml
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - Dockerfile
+        - proxy/**
+        - docs-site/**
+        - docs/**
+        - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH'
       changes:
         - Dockerfile
         - proxy/**
